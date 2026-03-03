@@ -1,0 +1,216 @@
+================================================================================
+                   AFL LADDER PREDICTION GAME - QUICK START
+================================================================================
+
+PROJECT LOCATION: /Users/MattWork/Documents/afl-ladder-game
+
+================================================================================
+                              SETUP (5 minutes)
+================================================================================
+
+1. Install Dependencies:
+   cd /Users/MattWork/Documents/afl-ladder-game/backend && npm install
+   cd /Users/MattWork/Documents/afl-ladder-game/frontend && npm install
+
+2. Start Infrastructure:
+   cd /Users/MattWork/Documents/afl-ladder-game
+   docker-compose up -d
+
+3. Setup Database:
+   cd backend
+   cp .env.example .env
+   npm run migrate
+   npm run seed
+
+4. Start Backend (Terminal 1):
+   cd backend
+   npm run dev
+   → Runs on http://localhost:3000
+
+5. Start Frontend (Terminal 2):
+   cd frontend
+   npm run dev
+   → Runs on http://localhost:5173
+
+================================================================================
+                            WHAT'S READY
+================================================================================
+
+✅ Complete Backend API (Express + TypeScript)
+✅ Full Database Schema (PostgreSQL)
+✅ User Authentication (Register, Login, JWT)
+✅ Prediction System (Submit & edit predictions)
+✅ Competition Management (Create, join, invite)
+✅ Scoring System (Automatic calculation)
+✅ Leaderboards (Global, personal, competition)
+✅ Admin Features (Upload AFL ladder data)
+✅ Complete Frontend (React + TypeScript)
+
+================================================================================
+                           FEATURES TO TEST
+================================================================================
+
+1. Register & Login
+   - Go to http://localhost:5173
+   - Click "Register here"
+   - Create account and login
+
+2. Create Competition
+   - Dashboard → "New Competition"
+   - Enter name, click Create
+   - See competition in "Your Competitions"
+
+3. Join Competition
+   - Get join code from someone else
+   - Dashboard → "Join Competition"
+   - Enter code, click Join
+
+4. Submit Prediction
+   - Dashboard → "Make Prediction"
+   - Select 18 AFL teams by position
+   - Click "Submit Prediction"
+
+5. View Leaderboards
+   - Dashboard → "Global Leaderboard"
+   - Switch between Global and Personal views
+   - See all scores and rankings
+
+6. Test Scoring (Advanced)
+   - Use Postman/cURL to:
+     a) Submit prediction
+     b) Admin upload AFL ladder
+     c) Check leaderboards auto-updated
+
+================================================================================
+                            IMPORTANT DATES
+================================================================================
+
+TODAY: MVP Complete (9 days before cutoff)
+March 10, 2026: Prediction Cutoff Deadline ⚠️
+Late March: AFL Season Starts
+September: Season Ends, Final Scores Locked
+
+================================================================================
+                          KEY FILE LOCATIONS
+================================================================================
+
+Backend API Routes:
+  - Authentication: src/routes/auth.ts
+  - Predictions: src/routes/predictions.ts
+  - Competitions: src/routes/competitions.ts
+  - Leaderboards: src/routes/leaderboards.ts
+  - Admin: src/routes/admin.ts
+
+Frontend Pages:
+  - Login: src/pages/LoginPage.tsx
+  - Dashboard: src/pages/DashboardPage.tsx
+  - Predictions: src/pages/PredictionPage.tsx
+  - Leaderboard: src/pages/LeaderboardPage.tsx
+  - Competition: src/pages/CompetitionPage.tsx
+
+Database Schema:
+  - migrations/001_initial_schema.sql
+
+Configuration:
+  - Backend: backend/.env.example
+  - Frontend: frontend/vite.config.ts
+  - Docker: docker-compose.yml
+
+================================================================================
+                         USEFUL COMMANDS
+================================================================================
+
+Backend:
+  npm run dev        - Start dev server
+  npm run build      - Compile TypeScript
+  npm run migrate    - Run database migrations
+  npm run seed       - Seed initial data
+
+Frontend:
+  npm run dev        - Start dev server
+  npm run build      - Build for production
+  npm run preview    - Preview production build
+
+Docker:
+  docker-compose up -d      - Start containers
+  docker-compose down       - Stop containers
+  docker-compose logs       - View logs
+  docker-compose ps         - Check status
+
+Testing:
+  curl http://localhost:3000/api/health      - Check backend
+  curl http://localhost:5173                 - Check frontend
+
+================================================================================
+                           NEXT STEPS
+================================================================================
+
+1. Test the application
+   - Create account
+   - Create/join competitions
+   - Submit predictions
+   - Check leaderboards
+
+2. Fix any bugs
+   - Check console for errors
+   - Review browser DevTools Network tab
+   - Check server logs: docker-compose logs
+
+3. Before March 10:
+   - Deploy to production
+   - Test in production environment
+   - Announce to friends
+   - Monitor for issues
+
+4. After March 10:
+   - Users can't submit new predictions
+   - Only editing existing ones
+   - Manually update AFL ladder weekly
+
+================================================================================
+                         TROUBLESHOOTING
+================================================================================
+
+Can't connect to database?
+  docker-compose logs postgres
+  docker-compose restart postgres
+
+Port already in use?
+  Backend: Change PORT in .env
+  Frontend: Change port in vite.config.ts
+
+Module not found?
+  cd backend && rm -rf node_modules && npm install
+  cd frontend && rm -rf node_modules && npm install
+
+Clear everything and start over?
+  docker-compose down -v
+  rm -rf backend/node_modules frontend/node_modules
+  docker-compose up -d
+  npm install (in both directories)
+  npm run migrate && npm run seed
+
+================================================================================
+                       DOCUMENTATION
+================================================================================
+
+README.md - Project overview
+GETTING_STARTED.md - Detailed setup & API documentation
+MVP_COMPLETE.md - What's built, features list, deployment checklist
+
+================================================================================
+                         YOU'RE ALL SET! 🚀
+================================================================================
+
+The entire MVP is built and ready to test. You have a fully functional
+AFL Ladder Prediction Game with authentication, competitions, predictions,
+scoring, and leaderboards.
+
+Time to March 10 cutoff: 9 days
+Time to get it live: Now!
+
+Questions? Check the code comments or review the documentation files.
+
+Good luck! 🎉
+
+================================================================================
