@@ -2,7 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import cron from 'node-cron';
 import { db } from './db';
+import { syncLadderFromSquiggle } from './jobs/ladderSync';
 
 dotenv.config();
 
@@ -52,6 +54,14 @@ db.connect()
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
+
+    // Schedule automatic AFL ladder sync from Squiggle every 30 minutes (production only)
+    if (process.env.NODE_ENV === 'production') {
+      cron.schedule('*/30 * * * *', () => {
+        syncLadderFromSquiggle();
+      });
+      console.log('[LadderSync] Scheduled: syncing AFL ladder from Squiggle every 30 minutes');
+    }
   })
   .catch((err) => {
     console.error('Failed to connect to database:', err);
