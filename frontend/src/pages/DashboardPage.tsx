@@ -1,8 +1,28 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuthStore } from '../store/auth'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
+
+const CUTOFF = new Date('2026-03-10T00:00:00+11:00') // AEDT midnight
+
+function useCountdown(target: Date) {
+  const calc = () => {
+    const diff = target.getTime() - Date.now()
+    if (diff <= 0) return null
+    const days    = Math.floor(diff / 86_400_000)
+    const hours   = Math.floor((diff % 86_400_000) / 3_600_000)
+    const minutes = Math.floor((diff % 3_600_000)  / 60_000)
+    const seconds = Math.floor((diff % 60_000)     / 1_000)
+    return { days, hours, minutes, seconds, totalMs: diff }
+  }
+  const [remaining, setRemaining] = useState(calc)
+  useEffect(() => {
+    const id = setInterval(() => setRemaining(calc()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return remaining
+}
 
 interface Competition {
   id: number
@@ -34,6 +54,7 @@ export default function DashboardPage() {
   const logout = useAuthStore((state) => state.logout)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const countdown = useCountdown(CUTOFF)
 
   const [activePanel, setActivePanel] = useState<'none' | 'create' | 'join'>('none')
   const [formData, setFormData] = useState({ name: '', description: '', isPublic: false })
@@ -238,6 +259,68 @@ export default function DashboardPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Cutoff Countdown ── */}
+        {countdown && (
+          <div
+            className={`mb-6 rounded-2xl px-5 py-4 flex flex-wrap items-center justify-between gap-4 ${
+              countdown.days === 0
+                ? 'bg-red-50 border border-red-200'
+                : countdown.days <= 2
+                ? 'bg-amber-50 border border-amber-200'
+                : 'bg-emerald-50 border border-emerald-200'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                countdown.days === 0 ? 'bg-red-500' : countdown.days <= 2 ? 'bg-amber-400' : 'bg-emerald-500'
+              }`}>
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <p className={`text-xs font-bold uppercase tracking-widest ${
+                  countdown.days === 0 ? 'text-red-600' : countdown.days <= 2 ? 'text-amber-700' : 'text-emerald-700'
+                }`}>
+                  {countdown.days === 0 ? '⚠ Final hours!' : countdown.days <= 2 ? '⚡ Closing soon' : '⏰ Submission deadline'}
+                </p>
+                <p className="text-slate-700 text-sm font-medium">
+                  Predictions close <span className="font-bold">Mon 10 March at midnight AEDT</span>
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {[
+                { v: countdown.days,    l: 'd' },
+                { v: countdown.hours,   l: 'h' },
+                { v: countdown.minutes, l: 'm' },
+                { v: countdown.seconds, l: 's' },
+              ].map(({ v, l }) => (
+                <div key={l} className="text-center">
+                  <p className={`text-2xl font-black tabular-nums ${
+                    countdown.days === 0 ? 'text-red-600' : countdown.days <= 2 ? 'text-amber-600' : 'text-emerald-700'
+                  }`}>
+                    {String(v).padStart(2, '0')}
+                  </p>
+                  <p className="text-xs text-slate-500 font-semibold">{l}</p>
+                </div>
+              ))}
+              <button
+                onClick={() => navigate('/prediction/1')}
+                className={`ml-2 px-4 py-2 text-white font-bold rounded-xl text-sm transition-colors ${
+                  countdown.days === 0
+                    ? 'bg-red-500 hover:bg-red-600'
+                    : countdown.days <= 2
+                    ? 'bg-amber-500 hover:bg-amber-600'
+                    : 'bg-emerald-500 hover:bg-emerald-600'
+                }`}
+              >
+                Submit now
+              </button>
             </div>
           </div>
         )}

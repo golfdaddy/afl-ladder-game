@@ -3,6 +3,7 @@ import { AuthRequest } from '../middleware/auth'
 import { AFLLadderModel, AFLTeam } from '../models/aflLadder'
 import { ScoreModel } from '../models/score'
 import { SquiggleService } from '../services/squiggle'
+import { EmailGroupModel } from '../models/emailGroup'
 import { UserModel, UserRole } from '../models/user'
 
 export class AdminController {
@@ -185,5 +186,77 @@ export class AdminController {
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV,
     })
+  }
+
+  // ── Email Groups ──────────────────────────────────────────────────────────
+
+  /** List all email groups */
+  static async listEmailGroups(_req: Request, res: Response) {
+    try {
+      const groups = await EmailGroupModel.listGroups()
+      res.json({ groups })
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to list email groups' })
+    }
+  }
+
+  /**
+   * Get the email group IDs for a specific user.
+   * Returns { groupIds: number[] }
+   */
+  static async getUserEmailGroups(req: Request, res: Response) {
+    try {
+      const userId = parseInt((req as any).params.userId)
+      const groupIds = await EmailGroupModel.getUserGroupIds(userId)
+      res.json({ groupIds })
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to get user email groups' })
+    }
+  }
+
+  /** Add a user to an email group */
+  static async addUserToEmailGroup(req: Request, res: Response) {
+    try {
+      const userId  = parseInt((req as any).params.userId)
+      const groupId = parseInt((req as any).params.groupId)
+      await EmailGroupModel.addUserToGroup(userId, groupId)
+      res.json({ message: 'User added to group' })
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to add user to group' })
+    }
+  }
+
+  /** Remove a user from an email group */
+  static async removeUserFromEmailGroup(req: Request, res: Response) {
+    try {
+      const userId  = parseInt((req as any).params.userId)
+      const groupId = parseInt((req as any).params.groupId)
+      await EmailGroupModel.removeUserFromGroup(userId, groupId)
+      res.json({ message: 'User removed from group' })
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to remove user from group' })
+    }
+  }
+
+  /**
+   * List all users with their group memberships in one call.
+   * Returns { users: AdminUser[], groups: EmailGroup[], memberships: Record<userId, groupId[]> }
+   */
+  static async listUsersWithGroups(_req: Request, res: Response) {
+    try {
+      const users  = await UserModel.listAll()
+      const groups = await EmailGroupModel.listGroups()
+
+      // Build a membership map: userId → groupIds[]
+      const memberships: Record<number, number[]> = {}
+      for (const u of users) {
+        memberships[u.id] = await EmailGroupModel.getUserGroupIds(u.id)
+      }
+
+      res.json({ users, groups, memberships })
+    } catch (error) {
+      console.error('listUsersWithGroups error:', error)
+      res.status(500).json({ error: 'Failed to load users and groups' })
+    }
   }
 }

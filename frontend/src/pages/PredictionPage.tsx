@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
@@ -111,6 +111,9 @@ export default function PredictionPage() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<'edit' | 'score'>('edit')
   const dragNode = useRef<HTMLDivElement | null>(null)
+  // Touch drag state
+  const touchDragIndex  = useRef<number | null>(null)
+  const touchLastTarget = useRef<number | null>(null)
 
   // Fetch existing prediction (enriched with actual positions if ladder exists)
   const { isLoading: isLoadingPrediction, data: predictionData } = useQuery({
@@ -194,6 +197,40 @@ export default function PredictionPage() {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
   }
+
+  // Touch handlers — use document.elementFromPoint to find drop target during scroll-less drag
+  const handleTouchStart = useCallback((index: number) => {
+    touchDragIndex.current  = index
+    touchLastTarget.current = index
+    setDragIndex(index)
+  }, [])
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    e.preventDefault() // prevent page scroll while dragging
+    const touch = e.touches[0]
+    const el = document.elementFromPoint(touch.clientX, touch.clientY)
+    const row = el?.closest('[data-team-index]') as HTMLElement | null
+    if (!row) return
+    const newIndex = parseInt(row.getAttribute('data-team-index') || '-1')
+    if (newIndex < 0 || newIndex === touchLastTarget.current) return
+    touchLastTarget.current = newIndex
+    setDragOverIndex(newIndex)
+    setLadder((prev) => {
+      const next = [...prev]
+      const from = touchDragIndex.current!
+      const item = next.splice(from, 1)[0]
+      next.splice(newIndex, 0, item)
+      touchDragIndex.current = newIndex
+      return next
+    })
+  }, [])
+
+  const handleTouchEnd = useCallback(() => {
+    touchDragIndex.current  = null
+    touchLastTarget.current = null
+    setDragIndex(null)
+    setDragOverIndex(null)
+  }, [])
 
   const moveTeam = (fromIndex: number, direction: 'up' | 'down') => {
     const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1
@@ -460,11 +497,15 @@ export default function PredictionPage() {
                 return (
                   <div
                     key={team.name}
+                    data-team-index={index}
                     draggable
                     onDragStart={(e) => handleDragStart(index, e)}
                     onDragEnter={() => handleDragEnter(index)}
                     onDragOver={handleDragOver}
                     onDragEnd={handleDragEnd}
+                    onTouchStart={() => handleTouchStart(index)}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
                     className={`
                       relative flex items-center px-4 py-2.5 cursor-grab active:cursor-grabbing
                       transition-colors duration-100 select-none border-b border-slate-50 last:border-b-0

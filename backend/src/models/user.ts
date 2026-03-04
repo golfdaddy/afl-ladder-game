@@ -113,6 +113,37 @@ export class UserModel {
     return result.rows[0] || null
   }
 
+  /** Set a password-reset token with a 1-hour expiry */
+  static async setPasswordResetToken(id: number, token: string, expires: Date): Promise<void> {
+    await db.query(
+      `UPDATE users SET password_reset_token = $1, password_reset_expires = $2, updated_at = NOW() WHERE id = $3`,
+      [token, expires, id]
+    )
+  }
+
+  /** Find a user by a valid (unexpired) password reset token */
+  static async findByPasswordResetToken(token: string): Promise<User | null> {
+    const result = await db.query(
+      `SELECT id, email, display_name as "displayName", email_verified as "emailVerified",
+              role, created_at as "createdAt"
+       FROM users
+       WHERE password_reset_token = $1 AND password_reset_expires > NOW()`,
+      [token]
+    )
+    return result.rows[0] || null
+  }
+
+  /** Reset a user's password and clear the reset token */
+  static async resetPassword(id: number, newPassword: string): Promise<void> {
+    const passwordHash = await hashPassword(newPassword)
+    await db.query(
+      `UPDATE users
+       SET password_hash = $1, password_reset_token = NULL, password_reset_expires = NULL, updated_at = NOW()
+       WHERE id = $2`,
+      [passwordHash, id]
+    )
+  }
+
   /** Admin: promote a user to admin by email (useful for first-time setup) */
   static async setRoleByEmail(email: string, role: UserRole): Promise<User | null> {
     const result = await db.query(

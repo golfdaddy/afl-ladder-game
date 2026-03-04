@@ -16,6 +16,12 @@ interface AdminUser {
   competitionCount: number
 }
 
+interface EmailGroup {
+  id: number
+  name: string
+  description: string | null
+}
+
 function fetchWithAuth(url: string, token: string, opts?: RequestInit) {
   return fetch(url, {
     ...opts,
@@ -54,11 +60,15 @@ export default function AdminPage() {
   }
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['admin-users'],
+    queryKey: ['admin-users-with-groups'],
     queryFn: async () => {
-      const res = await fetchWithAuth(`${API_BASE}/admin/users`, token!)
+      const res = await fetchWithAuth(`${API_BASE}/admin/users-with-groups`, token!)
       if (!res.ok) throw new Error('Failed to fetch users')
-      return res.json() as Promise<{ users: AdminUser[] }>
+      return res.json() as Promise<{
+        users: AdminUser[]
+        groups: EmailGroup[]
+        memberships: Record<number, number[]>
+      }>
     },
     enabled: !!token && isAdmin,
   })
@@ -73,7 +83,23 @@ export default function AdminPage() {
       return res.json()
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+      queryClient.invalidateQueries({ queryKey: ['admin-users-with-groups'] })
+    },
+  })
+
+  const toggleGroupMutation = useMutation({
+    mutationFn: async ({ userId, groupId, add }: { userId: number; groupId: number; add: boolean }) => {
+      const method = add ? 'POST' : 'DELETE'
+      const res = await fetchWithAuth(
+        `${API_BASE}/admin/users/${userId}/email-groups/${groupId}`,
+        token!,
+        { method }
+      )
+      if (!res.ok) throw new Error('Failed to update group')
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-users-with-groups'] })
     },
   })
 
@@ -95,9 +121,11 @@ export default function AdminPage() {
     }
   }
 
-  const users = data?.users || []
-  const adminCount = users.filter((u) => u.role === 'admin').length
-  const userCount = users.filter((u) => u.role === 'user').length
+  const users       = data?.users       || []
+  const groups      = data?.groups      || []
+  const memberships = data?.memberships || {}
+  const adminCount  = users.filter((u) => u.role === 'admin').length
+  const userCount   = users.filter((u) => u.role === 'user').length
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -196,6 +224,7 @@ export default function AdminPage() {
                     <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">User</th>
                     <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Stats</th>
                     <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Joined</th>
+                    <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Email Groups</th>
                     <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Role</th>
                   </tr>
                 </thead>
@@ -246,6 +275,32 @@ export default function AdminPage() {
                             month: 'short',
                             year: 'numeric',
                           })}
+                        </td>
+                        {/* Email groups */}
+                        <td className="px-6 py-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            {groups.map((g) => {
+                              const isMember = (memberships[u.id] || []).includes(g.id)
+                              const isToggling = toggleGroupMutation.isPending &&
+                                (toggleGroupMutation.variables as any)?.userId === u.id &&
+                                (toggleGroupMutation.variables as any)?.groupId === g.id
+                              return (
+                                <button
+                                  key={g.id}
+                                  title={g.description || g.name}
+                                  disabled={isToggling}
+                                  onClick={() => toggleGroupMutation.mutate({ userId: u.id, groupId: g.id, add: !isMember })}
+                                  className={`px-2 py-0.5 rounded-full text-xs font-semibold border transition-colors ${
+                                    isMember
+                                      ? 'bg-blue-100 border-blue-300 text-blue-700 hover:bg-red-50 hover:border-red-300 hover:text-red-600'
+                                      : 'bg-slate-50 border-slate-200 text-slate-400 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-600'
+                                  } disabled:opacity-50`}
+                                >
+                                  {isMember ? '✓ ' : '+ '}{g.name}
+                                </button>
+                              )
+                            })}
+                          </div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">

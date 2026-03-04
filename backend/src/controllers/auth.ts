@@ -1,8 +1,10 @@
 import { Response } from 'express'
+import { v4 as uuidv4 } from 'uuid'
 import { AuthRequest } from '../middleware/auth'
 import { registerSchema, loginSchema, RegisterInput, LoginInput } from '../schemas/auth'
 import { UserModel } from '../models/user'
 import { generateToken, generateVerificationToken } from '../utils/jwt'
+import { sendPasswordResetEmail } from '../services/email'
 
 export class AuthController {
   static async register(req: AuthRequest, res: Response) {
@@ -121,5 +123,56 @@ export class AuthController {
   static async logout(req: AuthRequest, res: Response) {
     // JWT is stateless, so logout just happens on client
     res.json({ message: 'Logged out successfully' })
+  }
+
+  static async forgotPassword(req: AuthRequest, res: Response) {
+    try {
+      const { email } = req.body
+      if (!email) {
+        return res.status(400).json({ error: 'Email is required' })
+      }
+
+      const user = await UserModel.findByEmail(email)
+      // Always return the same message to avoid revealing whether the email exists
+      const okMsg = { message: 'If that email is registered, you will receive a reset link shortly.' }
+
+      if (!user) return res.json(okMsg)
+
+      const resetToken = uuidv4()
+      const expires = new Date(Date.now() + 60 * 60 * 1000) // 1 hour
+      await UserModel.setPasswordResetToken(user.id, resetToken, expires)
+
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173'
+      const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`
+      await sendPasswordResetEmail(user.email, resetUrl)
+
+      res.json(okMsg)
+    } catch (error) {
+      console.error('Forgot password error:', error)
+      res.status(500).json({ error: 'Failed to process request' })
+    }
+  }
+
+  static async resetPassword(req: AuthRequest, res: Response) {
+    try {
+      const { token, password } = req.body
+      if (!token || !password) {
+        return res.status(400).json({ error: 'Token and new password are required' })
+      }
+      if (password.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 characters' })
+      }
+
+      const user = await UserModel.findByPasswordResetToken(token)
+      if (!user) {
+        return res.status(400).json({ error: 'This reset link has expired or is invalid. Please request a new one.' })
+      }
+
+      await UserModel.resetPassword(user.id, password)
+      res.json({ message: 'Password reset successfully. You can now sign in.' })
+    } catch (error) {
+      console.error('Reset password error:', error)
+      res.status(500).json({ error: 'Failed to reset password' })
+    }
   }
 }

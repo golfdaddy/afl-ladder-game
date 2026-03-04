@@ -17,6 +17,15 @@ router.post('/sync-ladder', adminAuth, AdminController.syncFromSquiggle)
 router.get('/users', authMiddleware, requireAdmin, AdminController.listUsers)
 router.put('/users/:id/role', authMiddleware, requireAdmin, AdminController.setUserRole)
 
+// Users + groups combined (for admin UI)
+router.get('/users-with-groups', authMiddleware, requireAdmin, AdminController.listUsersWithGroups)
+
+// Email group membership
+router.get('/email-groups', authMiddleware, requireAdmin, AdminController.listEmailGroups)
+router.get('/users/:userId/email-groups', authMiddleware, requireAdmin, AdminController.getUserEmailGroups)
+router.post('/users/:userId/email-groups/:groupId', authMiddleware, requireAdmin, AdminController.addUserToEmailGroup)
+router.delete('/users/:userId/email-groups/:groupId', authMiddleware, requireAdmin, AdminController.removeUserFromEmailGroup)
+
 // Promote by email — callable with just X-Admin-Secret (for first-time setup)
 router.post('/promote-email', adminAuth, AdminController.promoteByEmail)
 

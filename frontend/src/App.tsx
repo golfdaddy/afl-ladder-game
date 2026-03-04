@@ -12,6 +12,8 @@ import LeaderboardPage from './pages/LeaderboardPage'
 import InviteAcceptPage from './pages/InviteAcceptPage'
 import AdminPage from './pages/AdminPage'
 import NotFoundPage from './pages/NotFoundPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 
 const queryClient = new QueryClient()
 
@@ -38,6 +40,8 @@ function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route
             path="/dashboard"
