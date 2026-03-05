@@ -3,6 +3,8 @@ import { AdminController } from '../controllers/admin'
 import { adminAuth } from '../middleware/adminAuth'
 import { authMiddleware } from '../middleware/auth'
 import { requireAdmin } from '../middleware/requireAdmin'
+import { requireFantasy7Enabled } from '../middleware/fantasyFeature'
+import { FantasyAdminController } from '../controllers/fantasyAdmin'
 
 const router = Router()
 
@@ -33,5 +35,12 @@ router.get('/export/predictions', authMiddleware, requireAdmin, AdminController.
 router.post('/promote-email', adminAuth, AdminController.promoteByEmail)
 
 router.get('/health', AdminController.health)
+
+// Fantasy 7 admin ops — JWT admin only, feature-flagged
+router.get('/fantasy/health', requireFantasy7Enabled, authMiddleware, requireAdmin, FantasyAdminController.health)
+router.post('/fantasy/sync/round/:roundId', requireFantasy7Enabled, authMiddleware, requireAdmin, FantasyAdminController.syncRound)
+router.post('/fantasy/price/round/:roundId', requireFantasy7Enabled, authMiddleware, requireAdmin, FantasyAdminController.priceRound)
+router.post('/fantasy/scores/round/:roundId', requireFantasy7Enabled, authMiddleware, requireAdmin, FantasyAdminController.ingestScores)
+router.post('/fantasy/recompute/round/:roundId', requireFantasy7Enabled, authMiddleware, requireAdmin, FantasyAdminController.recomputeRound)
 
 export default router

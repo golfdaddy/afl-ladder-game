@@ -11,3 +11,5 @@ export const COMPETITION_LOCKED = true
 
 // SEASON_OVER: 2 weeks after the grand final — join/create leagues re-appear for next season.
 export const SEASON_OVER = _now >= _seasonEnd
+
+export const FEATURE_FANTASY7_ENABLED = import.meta.env.VITE_FEATURE_FANTASY7_ENABLED === 'true'

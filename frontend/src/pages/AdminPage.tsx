@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
+import { FEATURE_FANTASY7_ENABLED } from '../config'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
 
@@ -40,6 +41,9 @@ export default function AdminPage() {
   const [syncStatus, setSyncStatus] = useState<string | null>(null)
   const [syncLoading, setSyncLoading] = useState(false)
   const [exportLoading, setExportLoading] = useState(false)
+  const [fantasyRoundId, setFantasyRoundId] = useState('1')
+  const [fantasyLoading, setFantasyLoading] = useState(false)
+  const [fantasyStatus, setFantasyStatus] = useState<string | null>(null)
 
   // Redirect if not admin
   if (!isAdmin) {
@@ -72,6 +76,21 @@ export default function AdminPage() {
       }>
     },
     enabled: !!token && isAdmin,
+  })
+
+  const { data: fantasyHealth } = useQuery({
+    queryKey: ['admin-fantasy-health'],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`${API_BASE}/admin/fantasy/health`, token!)
+      if (!res.ok) throw new Error('Failed to fetch fantasy health')
+      return res.json() as Promise<{
+        featureEnabled: boolean
+        provider: { provider: string; ok: boolean; details?: string }
+        counts: { rounds: number; players: number; competitions: number }
+      }>
+    },
+    enabled: !!token && isAdmin && FEATURE_FANTASY7_ENABLED,
+    retry: false,
   })
 
   const setRoleMutation = useMutation({
@@ -138,6 +157,30 @@ export default function AdminPage() {
       alert(`Export failed: ${err.message}`)
     } finally {
       setExportLoading(false)
+    }
+  }
+
+  async function runFantasyAction(action: 'sync' | 'price' | 'scores' | 'recompute') {
+    const parsedRoundId = Number(fantasyRoundId)
+    if (!Number.isFinite(parsedRoundId) || parsedRoundId <= 0) {
+      setFantasyStatus('❌ Enter a valid round ID')
+      return
+    }
+
+    setFantasyLoading(true)
+    setFantasyStatus(null)
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/admin/fantasy/${action}/round/${parsedRoundId}`, token!, {
+        method: 'POST',
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error || `Fantasy ${action} failed`)
+      setFantasyStatus(`✅ ${body.message || `Fantasy ${action} completed`}`)
+      queryClient.invalidateQueries({ queryKey: ['admin-fantasy-health'] })
+    } catch (err: any) {
+      setFantasyStatus(`❌ ${err.message}`)
+    } finally {
+      setFantasyLoading(false)
     }
   }
 
@@ -232,6 +275,62 @@ export default function AdminPage() {
               )}
             </button>
           </div>
+          {FEATURE_FANTASY7_ENABLED && (
+            <div className="mt-5 rounded-xl border border-slate-200 p-4">
+              <h3 className="text-sm font-bold text-slate-700 mb-3">Fantasy 7 Operations</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  value={fantasyRoundId}
+                  onChange={(e) => setFantasyRoundId(e.target.value)}
+                  className="w-28 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm"
+                  placeholder="Round ID"
+                />
+                <button
+                  onClick={() => runFantasyAction('sync')}
+                  disabled={fantasyLoading}
+                  className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  Sync
+                </button>
+                <button
+                  onClick={() => runFantasyAction('price')}
+                  disabled={fantasyLoading}
+                  className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  Price
+                </button>
+                <button
+                  onClick={() => runFantasyAction('scores')}
+                  disabled={fantasyLoading}
+                  className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  Scores
+                </button>
+                <button
+                  onClick={() => runFantasyAction('recompute')}
+                  disabled={fantasyLoading}
+                  className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  Recompute
+                </button>
+              </div>
+              {fantasyHealth && (
+                <p className="mt-3 text-xs text-slate-500">
+                  Provider: <span className="font-semibold text-slate-700">{fantasyHealth.provider.provider}</span>
+                  {' • '}Rounds: {fantasyHealth.counts.rounds}
+                  {' • '}Players: {fantasyHealth.counts.players}
+                  {' • '}Competitions: {fantasyHealth.counts.competitions}
+                </p>
+              )}
+              {fantasyStatus && (
+                <p className={`mt-2 text-sm font-medium ${fantasyStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {fantasyStatus}
+                </p>
+              )}
+            </div>
+          )}
           {syncStatus && (
             <p className={`mt-3 text-sm font-medium ${syncStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
               {syncStatus}

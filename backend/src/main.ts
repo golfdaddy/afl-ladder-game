@@ -6,6 +6,7 @@ import cron from 'node-cron';
 import { db } from './db';
 import { runMigrations } from './migrations/run';
 import { syncLadderFromSquiggle } from './jobs/ladderSync';
+import { runFantasySyncJobs } from './jobs/fantasySync';
 
 dotenv.config();
 
@@ -33,6 +34,7 @@ import competitionsRoutes from './routes/competitions';
 import leaderboardRoutes from './routes/leaderboards';
 import adminRoutes from './routes/admin';
 import seasonsRoutes from './routes/seasons';
+import fantasyRoutes from './routes/fantasy';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/predictions', predictionsRoutes);
@@ -40,6 +42,7 @@ app.use('/api/competitions', competitionsRoutes);
 app.use('/api/leaderboards', leaderboardRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/seasons', seasonsRoutes);
+app.use('/api/fantasy', fantasyRoutes);
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -64,6 +67,11 @@ db.connect()
         syncLadderFromSquiggle();
       });
       console.log('[LadderSync] Scheduled: syncing AFL ladder from Squiggle every 30 minutes');
+
+      cron.schedule('*/30 * * * *', () => {
+        runFantasySyncJobs()
+      })
+      console.log('[FantasySync] Scheduled: ingestion/pricing/scoring every 30 minutes')
     }
   })
   .catch((err) => {

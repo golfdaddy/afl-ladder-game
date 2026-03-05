@@ -14,6 +14,7 @@ A competitive AFL ladder prediction game where users predict the final 1–18 la
 - 🤝 **Competitions** — create private leagues, invite friends by email, join with a code
 - 🥇 **Leaderboards** — per-competition and global rankings
 - 🛡️ **Admin panel** — user management, ladder sync, role assignment
+- ⚡ **Fantasy 7 (feature-flagged)** — weekly 7-player lineup game with salary cap and rolling locks
 
 ---
 
@@ -188,6 +189,8 @@ Lower score = better. Perfect = 0. Updated on every ladder sync.
 | `ADMIN_SECRET` | ✅ | Secret for headless admin API access |
 | `FRONTEND_URL` | | Frontend origin for CORS (default: `http://localhost:5173`) |
 | `PORT` | | API port (default: `3000`) |
+| `FEATURE_FANTASY7_ENABLED` | | Enables `/api/fantasy` and fantasy admin endpoints (`true`/`false`) |
+| `FANTASY_PROVIDER` | | Fantasy provider adapter (default: `mock`) |
 | `SMTP_HOST/USER/PASS` | | Email sending (optional; logs to console in dev) |
 
 ### `frontend/.env`
@@ -195,6 +198,27 @@ Lower score = better. Perfect = 0. Updated on every ladder sync.
 | Variable | Description |
 |---|---|
 | `VITE_API_URL` | Backend URL (default: `http://localhost:3000/api`) |
+| `VITE_FEATURE_FANTASY7_ENABLED` | Enables fantasy frontend routes/pages (`true`/`false`) |
+
+---
+
+## Fantasy 7 MVP API
+
+When `FEATURE_FANTASY7_ENABLED=true`, these routes are available:
+
+- `GET /api/fantasy/rounds/current?competitionId={id}`
+- `GET /api/fantasy/players?competitionId={id}&roundId={id}`
+- `GET /api/fantasy/lineups/:competitionId/:roundId/me`
+- `PUT /api/fantasy/lineups/:competitionId/:roundId/me`
+- `GET /api/fantasy/competitions`
+- `POST /api/fantasy/competitions`
+- `GET /api/fantasy/competitions/:id`
+- `POST /api/fantasy/competitions/join`
+- `POST /api/fantasy/competitions/:id/invite`
+- `POST /api/fantasy/competitions/invites/:token/accept`
+- `POST /api/fantasy/competitions/invites/:token/decline`
+- `GET /api/fantasy/leaderboards/competition/:competitionId`
+- `GET /api/fantasy/leaderboards/season/:competitionId`
 
 ---
 

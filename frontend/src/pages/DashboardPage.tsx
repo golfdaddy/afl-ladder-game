@@ -3,7 +3,7 @@ import { useAuthStore } from '../store/auth'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
-import { COMPETITION_LOCKED, SEASON_OVER, CUTOFF } from '../config'
+import { COMPETITION_LOCKED, SEASON_OVER, CUTOFF, FEATURE_FANTASY7_ENABLED } from '../config'
 
 function useCountdown(target: Date) {
   const calc = () => {
@@ -234,6 +234,14 @@ export default function DashboardPage() {
                   className="px-3 py-1.5 text-sm font-medium text-emerald-400 hover:text-emerald-300 border border-emerald-800 hover:border-emerald-600 rounded-lg transition-colors flex items-center gap-1.5"
                 >
                   🛡️ Admin
+                </button>
+              )}
+              {FEATURE_FANTASY7_ENABLED && (
+                <button
+                  onClick={() => navigate('/fantasy/dashboard')}
+                  className="px-3 py-1.5 text-sm font-medium text-blue-300 hover:text-blue-200 border border-blue-900 hover:border-blue-700 rounded-lg transition-colors"
+                >
+                  Fantasy 7
                 </button>
               )}
               <button
