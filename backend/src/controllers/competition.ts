@@ -165,18 +165,18 @@ export class CompetitionController {
 
       const result = await db.query(
         `SELECT u.id as "userId", u.display_name as "displayName",
-                p.id as "predictionId", p.submitted_at as "submittedAt",
+                p.submitted_at as "submittedAt",
                 pt.position, pt.team_name as "teamName"
          FROM competition_members cm
          JOIN users u ON cm.user_id = u.id
          LEFT JOIN predictions p ON p.user_id = u.id AND p.season_id = $2
-         LEFT JOIN prediction_teams pt ON pt.prediction_id = p.id
+         LEFT JOIN predicted_teams pt ON pt.prediction_id = p.id
          WHERE cm.competition_id = $1 AND p.submitted_at IS NOT NULL
          ORDER BY u.display_name, pt.position`,
         [compId, competition.seasonId]
       )
 
-      // Group by user
+      // Group by user — build ladder as ordered string[]
       const usersMap: Record<number, any> = {}
       for (const row of result.rows) {
         if (!usersMap[row.userId]) {
@@ -184,11 +184,11 @@ export class CompetitionController {
             userId: row.userId,
             displayName: row.displayName,
             submittedAt: row.submittedAt,
-            teams: [],
+            ladder: [],
           }
         }
         if (row.teamName) {
-          usersMap[row.userId].teams.push({ position: row.position, teamName: row.teamName })
+          usersMap[row.userId].ladder.push(row.teamName)
         }
       }
 
