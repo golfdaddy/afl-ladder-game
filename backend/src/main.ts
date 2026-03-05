@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import cron from 'node-cron';
 import { db } from './db';
+import { runMigrations } from './migrations/run';
 import { syncLadderFromSquiggle } from './jobs/ladderSync';
 
 dotenv.config();
@@ -51,6 +52,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 // Start server
 db.connect()
+  .then(() => runMigrations())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

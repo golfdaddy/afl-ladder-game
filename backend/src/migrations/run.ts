@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-async function runMigrations() {
+export async function runMigrations() {
   try {
     console.log('Running migrations...');
 
@@ -33,11 +33,13 @@ async function runMigrations() {
     }
 
     console.log('All migrations completed successfully');
-    process.exit(0);
   } catch (error) {
     console.error('Migration failed:', error);
-    process.exit(1);
+    throw error;
   }
 }
 
-runMigrations();
+// Allow running directly: node dist/migrations/run.js
+if (require.main === module) {
+  runMigrations().then(() => process.exit(0)).catch(() => process.exit(1));
+}
