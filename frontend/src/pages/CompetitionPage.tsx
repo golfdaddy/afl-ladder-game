@@ -605,7 +605,7 @@ export default function CompetitionPage() {
                 <span className="text-base">🔒</span>
               </div>
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Everyone's Ladder</h2>
+                <h2 className="text-lg font-bold text-slate-900">League Ladders</h2>
                 <p className="text-sm text-slate-500 mt-0.5">All submissions revealed — competition is closed</p>
               </div>
             </div>

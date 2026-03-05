@@ -834,7 +834,7 @@ export default function DashboardPage() {
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
                 <span className="text-base">🔒</span>
-                <h3 className="font-bold text-slate-900 text-sm">Everyone's Ladder</h3>
+                <h3 className="font-bold text-slate-900 text-sm">League Ladders</h3>
                 <span className="text-xs text-slate-400 ml-1">· all submissions revealed</span>
               </div>
               {spotlightPredictions.length === 0 ? (

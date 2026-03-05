@@ -167,14 +167,16 @@ export class CompetitionController {
         `SELECT u.id as "userId", u.display_name as "displayName",
                 p.submitted_at as "submittedAt",
                 pt.position, pt.team_name as "teamName"
-         FROM competition_members cm
-         JOIN users u ON cm.user_id = u.id
-         LEFT JOIN predictions p ON p.user_id = u.id AND p.season_id = $2
-         LEFT JOIN predicted_teams pt ON pt.prediction_id = p.id
-         WHERE cm.competition_id = $1 AND p.submitted_at IS NOT NULL
+         FROM predictions p
+         JOIN competition_members cm ON cm.user_id = p.user_id AND cm.competition_id = $1
+         JOIN users u ON u.id = p.user_id
+         JOIN predicted_teams pt ON pt.prediction_id = p.id
+         WHERE p.season_id = $2
          ORDER BY u.display_name, pt.position`,
         [compId, competition.seasonId]
       )
+
+      console.log(`[getCompetitionPredictions] comp=${compId} season=${competition.seasonId} rows=${result.rows.length}`)
 
       // Group by user — build ladder as ordered string[]
       const usersMap: Record<number, any> = {}
