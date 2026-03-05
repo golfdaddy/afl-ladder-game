@@ -3,6 +3,7 @@ import { AuthRequest } from '../middleware/auth'
 import { CompetitionModel } from '../models/competition'
 import { CompetitionInviteModel } from '../models/competitionInvite'
 import { SeasonModel } from '../models/season'
+import { db } from '../db'
 
 export class CompetitionController {
   static async create(req: AuthRequest, res: Response) {
@@ -145,6 +146,56 @@ export class CompetitionController {
     } catch (error) {
       console.error('Competition join error:', error)
       res.status(500).json({ error: 'Failed to join competition' })
+    }
+  }
+
+  // Returns all submitted predictions for every member in a competition (post-lockout view)
+  static async getCompetitionPredictions(req: AuthRequest, res: Response) {
+    try {
+      if (!req.userId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+      const compId = parseInt(req.params.id)
+      const isMember = await CompetitionModel.isMember(compId, req.userId)
+      const competition = await CompetitionModel.findById(compId)
+      if (!competition) return res.status(404).json({ error: 'Competition not found' })
+      if (!isMember && !competition.isPublic) {
+        return res.status(403).json({ error: 'Access denied' })
+      }
+
+      const result = await db.query(
+        `SELECT u.id as "userId", u.display_name as "displayName",
+                p.id as "predictionId", p.submitted_at as "submittedAt",
+                pt.position, pt.team_name as "teamName"
+         FROM competition_members cm
+         JOIN users u ON cm.user_id = u.id
+         LEFT JOIN predictions p ON p.user_id = u.id AND p.season_id = $2
+         LEFT JOIN prediction_teams pt ON pt.prediction_id = p.id
+         WHERE cm.competition_id = $1 AND p.submitted_at IS NOT NULL
+         ORDER BY u.display_name, pt.position`,
+        [compId, competition.seasonId]
+      )
+
+      // Group by user
+      const usersMap: Record<number, any> = {}
+      for (const row of result.rows) {
+        if (!usersMap[row.userId]) {
+          usersMap[row.userId] = {
+            userId: row.userId,
+            displayName: row.displayName,
+            submittedAt: row.submittedAt,
+            teams: [],
+          }
+        }
+        if (row.teamName) {
+          usersMap[row.userId].teams.push({ position: row.position, teamName: row.teamName })
+        }
+      }
+
+      res.json({ predictions: Object.values(usersMap) })
+    } catch (error) {
+      console.error('Competition predictions error:', error)
+      res.status(500).json({ error: 'Failed to fetch predictions' })
     }
   }
 

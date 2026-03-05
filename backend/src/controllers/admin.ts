@@ -5,6 +5,7 @@ import { ScoreModel } from '../models/score'
 import { SquiggleService } from '../services/squiggle'
 import { EmailGroupModel } from '../models/emailGroup'
 import { UserModel, UserRole } from '../models/user'
+import { db } from '../db'
 
 export class AdminController {
   /** Manual ladder upload (18 teams with full stats) */
@@ -257,6 +258,79 @@ export class AdminController {
     } catch (error) {
       console.error('listUsersWithGroups error:', error)
       res.status(500).json({ error: 'Failed to load users and groups' })
+    }
+  }
+
+  /** Export all submitted ladder predictions as CSV for safe-keeping */
+  static async exportPredictions(req: AuthRequest, res: Response) {
+    try {
+      const seasonId = parseInt((req.query.seasonId as string) || '1')
+
+      // Get all 18 team names in position order (1–18) by sampling any prediction
+      const teamsResult = await db.query(
+        `SELECT DISTINCT pt.team_name as "teamName"
+         FROM prediction_teams pt
+         JOIN predictions p ON pt.prediction_id = p.id
+         WHERE p.season_id = $1
+         LIMIT 18`,
+        [seasonId]
+      )
+
+      // Get every submitted prediction for the season
+      const result = await db.query(
+        `SELECT u.id as "userId", u.display_name as "displayName", u.email,
+                p.id as "predictionId", p.submitted_at as "submittedAt", p.total_score as "totalScore",
+                pt.position, pt.team_name as "teamName"
+         FROM predictions p
+         JOIN users u ON p.user_id = u.id
+         JOIN prediction_teams pt ON pt.prediction_id = p.id
+         WHERE p.season_id = $1 AND p.submitted_at IS NOT NULL
+         ORDER BY u.display_name, pt.position`,
+        [seasonId]
+      )
+
+      // Group by user
+      const users: Record<number, any> = {}
+      for (const row of result.rows) {
+        if (!users[row.userId]) {
+          users[row.userId] = {
+            userId: row.userId,
+            displayName: row.displayName,
+            email: row.email,
+            submittedAt: row.submittedAt,
+            totalScore: row.totalScore,
+            ladder: [] as string[],
+          }
+        }
+        users[row.userId].ladder[row.position - 1] = row.teamName
+      }
+
+      const format = (req.query.format as string) || 'json'
+
+      if (format === 'csv') {
+        // Build CSV: displayName, email, submittedAt, totalScore, pos1..pos18
+        const positions = Array.from({ length: 18 }, (_, i) => `pos${i + 1}`)
+        const header = ['displayName', 'email', 'submittedAt', 'totalScore', ...positions].join(',')
+        const rows = Object.values(users).map((u: any) => {
+          const base = [
+            `"${u.displayName}"`,
+            `"${u.email}"`,
+            `"${u.submittedAt ? new Date(u.submittedAt).toISOString() : ''}"`,
+            u.totalScore ?? '',
+          ]
+          const teams = positions.map((_, i) => `"${u.ladder[i] || ''}"`)
+          return [...base, ...teams].join(',')
+        })
+        res.setHeader('Content-Type', 'text/csv')
+        res.setHeader('Content-Disposition', `attachment; filename="predictions-season${seasonId}.csv"`)
+        return res.send([header, ...rows].join('\n'))
+      }
+
+      // Default: JSON
+      res.json({ season: seasonId, count: Object.keys(users).length, predictions: Object.values(users) })
+    } catch (error) {
+      console.error('Export predictions error:', error)
+      res.status(500).json({ error: 'Failed to export predictions' })
     }
   }
 }

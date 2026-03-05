@@ -39,6 +39,7 @@ export default function AdminPage() {
   const queryClient = useQueryClient()
   const [syncStatus, setSyncStatus] = useState<string | null>(null)
   const [syncLoading, setSyncLoading] = useState(false)
+  const [exportLoading, setExportLoading] = useState(false)
 
   // Redirect if not admin
   if (!isAdmin) {
@@ -121,6 +122,25 @@ export default function AdminPage() {
     }
   }
 
+  async function handleExportPredictions() {
+    setExportLoading(true)
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/admin/export/predictions?format=csv&seasonId=1`, token!)
+      if (!res.ok) throw new Error('Export failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `predictions-season1-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      alert(`Export failed: ${err.message}`)
+    } finally {
+      setExportLoading(false)
+    }
+  }
+
   const users       = data?.users       || []
   const groups      = data?.groups      || []
   const memberships = data?.memberships || {}
@@ -192,6 +212,23 @@ export default function AdminPage() {
                 </>
               ) : (
                 '🔄 Sync Ladder from Squiggle'
+              )}
+            </button>
+            <button
+              onClick={handleExportPredictions}
+              disabled={exportLoading}
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-5 py-2.5 rounded-xl font-semibold text-sm transition-colors flex items-center gap-2"
+            >
+              {exportLoading ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Exporting…
+                </>
+              ) : (
+                '📥 Export All Submissions (CSV)'
               )}
             </button>
           </div>

@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
+import { COMPETITION_LOCKED } from '../config'
 
 interface AFLTeam {
   name: string
@@ -109,7 +110,7 @@ export default function PredictionPage() {
   const [error, setError] = useState('')
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
-  const [viewMode, setViewMode] = useState<'edit' | 'score'>('edit')
+  const [viewMode, setViewMode] = useState<'edit' | 'score'>(COMPETITION_LOCKED ? 'score' : 'edit')
   const dragNode = useRef<HTMLDivElement | null>(null)
   // Touch drag state
   const touchDragIndex  = useRef<number | null>(null)
@@ -133,9 +134,9 @@ export default function PredictionPage() {
             setLadder(reordered)
           }
 
-          // If we have actual positions, switch to score view
+          // If we have actual positions (or competition is locked), switch to score view
           const hasScores = sorted.some((t: any) => t.actualPosition !== null)
-          if (hasScores) setViewMode('score')
+          if (hasScores || COMPETITION_LOCKED) setViewMode('score')
         }
 
         return pred
@@ -260,7 +261,8 @@ export default function PredictionPage() {
   const ladderRound: number | null = predictionData?.ladderRound ?? null
   const ladderUpdatedAt: string | null = predictionData?.ladderUpdatedAt ?? null
 
-  const isScoreView = viewMode === 'score' && hasActualData
+  // When locked, always show score/read-only view (even without actual data yet)
+  const isScoreView = COMPETITION_LOCKED || (viewMode === 'score' && hasActualData)
 
   // Build a lookup from teamName → scored data (for score view)
   const scoreMap: Record<string, any> = {}
@@ -294,14 +296,16 @@ export default function PredictionPage() {
             <div>
               <h1 className="text-2xl font-black text-white">2026 AFL Ladder Prediction</h1>
               <p className="text-slate-400 mt-1 text-sm">
-                {isScoreView
+                {COMPETITION_LOCKED
+                  ? '🔒 Competition locked · Read-only view'
+                  : isScoreView
                   ? `Live scores — Round ${ladderRound ?? '?'} · Updated ${formatUpdatedAt(ladderUpdatedAt)}`
                   : 'Drag teams into your predicted finishing order · Cutoff Mar 10'}
               </p>
             </div>
 
-            {/* View toggle (only when we have actual data) */}
-            {hasActualData && (
+            {/* View toggle — hidden when locked; only shown when we have actual data */}
+            {!COMPETITION_LOCKED && hasActualData && (
               <div className="flex bg-slate-800 rounded-xl p-1 flex-shrink-0">
                 <button
                   onClick={() => setViewMode('score')}
@@ -384,7 +388,7 @@ export default function PredictionPage() {
           </div>
         )}
 
-        {/* ── SCORE VIEW ── */}
+        {/* ── SCORE VIEW (or locked read-only view) ── */}
         {isScoreView ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mt-3">
             {/* Column headers */}
@@ -397,10 +401,13 @@ export default function PredictionPage() {
             </div>
 
             <div className="divide-y divide-slate-50">
-              {scoredTeams
-                .slice()
-                .sort((a: any, b: any) => a.position - b.position)
-                .map((t: any) => {
+              {(hasActualData ? scoredTeams.slice().sort((a: any, b: any) => a.position - b.position) : ladder.map((team, i) => ({
+                teamName: team.name,
+                position: i + 1,
+                actualPosition: null,
+                diff: null,
+                points: null,
+              }))).map((t: any) => {
                   const meta = getTeamMeta(t.teamName)
                   const zone = getZone(t.position - 1)
                   const pts = t.points ?? null
@@ -576,8 +583,8 @@ export default function PredictionPage() {
           </div>
         )}
 
-        {/* Submit / navigation buttons */}
-        {!isScoreView && (
+        {/* Submit / navigation buttons — hidden when locked */}
+        {!isScoreView && !COMPETITION_LOCKED && (
           <div className="mt-5 flex gap-3">
             <button
               onClick={() => submitMutation.mutate()}
@@ -605,15 +612,18 @@ export default function PredictionPage() {
 
         {isScoreView && (
           <div className="mt-4 flex gap-3">
-            <button
-              onClick={() => setViewMode('edit')}
-              className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors"
-            >
-              Edit My Prediction
-            </button>
+            {/* "Edit My Prediction" only shown when competition is open */}
+            {!COMPETITION_LOCKED && (
+              <button
+                onClick={() => setViewMode('edit')}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors"
+              >
+                Edit My Prediction
+              </button>
+            )}
             <button
               onClick={() => navigate('/dashboard')}
-              className="px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-sm transition-colors"
+              className={`py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-sm transition-colors ${COMPETITION_LOCKED ? 'flex-1' : 'px-6'}`}
             >
               Dashboard
             </button>
@@ -622,7 +632,9 @@ export default function PredictionPage() {
 
         <div className="mt-4 bg-slate-900 rounded-xl p-4">
           <p className="text-xs text-slate-400 leading-relaxed">
-            {isScoreView
+            {COMPETITION_LOCKED
+              ? <>🔒 <span className="text-red-400 font-semibold">Competition is locked.</span> Submissions closed on March 10. Scores update automatically as the AFL season progresses.</>
+              : isScoreView
               ? <>Scores update automatically when the AFL ladder is synced. <span className="text-emerald-400 font-semibold">Lower total = better prediction.</span> Each team scored as |predicted − actual| position.</>
               : <><span className="text-slate-300 font-semibold">Drag</span> teams to reorder, or use the arrow buttons. You can update your prediction anytime before the <span className="text-emerald-400 font-semibold">March 10 cutoff</span>.</>
             }

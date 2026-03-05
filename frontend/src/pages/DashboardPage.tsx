@@ -3,8 +3,7 @@ import { useAuthStore } from '../store/auth'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
-
-const CUTOFF = new Date('2026-03-10T00:00:00+11:00') // AEDT midnight
+import { COMPETITION_LOCKED, CUTOFF } from '../config'
 
 function useCountdown(target: Date) {
   const calc = () => {
@@ -263,8 +262,30 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ── Cutoff Countdown ── */}
-        {countdown && (
+        {/* ── Locked Banner or Cutoff Countdown ── */}
+        {COMPETITION_LOCKED ? (
+          <div className="mb-6 rounded-2xl px-5 py-4 flex flex-wrap items-center justify-between gap-4 bg-slate-900 border border-slate-700">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-red-600">
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-red-400">🔒 Competition locked</p>
+                <p className="text-slate-300 text-sm font-medium">
+                  Submissions closed on <span className="font-bold text-white">Mon 10 March at midnight AEDT</span>
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => navigate('/prediction/1')}
+              className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl text-sm transition-colors"
+            >
+              View My Prediction
+            </button>
+          </div>
+        ) : countdown ? (
           <div
             className={`mb-6 rounded-2xl px-5 py-4 flex flex-wrap items-center justify-between gap-4 ${
               countdown.days === 0
@@ -323,7 +344,7 @@ export default function DashboardPage() {
               </button>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Quick Actions */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-8">
@@ -370,8 +391,8 @@ export default function DashboardPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
               </svg>
             </div>
-            <span className="font-bold text-slate-900 text-sm">Predict</span>
-            <span className="text-xs text-slate-400 mt-0.5">Your 2026 ladder</span>
+            <span className="font-bold text-slate-900 text-sm">{COMPETITION_LOCKED ? 'My Ladder' : 'Predict'}</span>
+            <span className="text-xs text-slate-400 mt-0.5">{COMPETITION_LOCKED ? 'View submission' : 'Your 2026 ladder'}</span>
           </button>
 
           <button
@@ -649,13 +670,18 @@ export default function DashboardPage() {
 
                   {/* Actions */}
                   <div className="px-5 pb-5 flex gap-2">
-                    {!comp.userHasSubmitted && (
+                    {!comp.userHasSubmitted && !COMPETITION_LOCKED && (
                       <button
                         onClick={(e) => { e.stopPropagation(); navigate('/prediction/1') }}
                         className="flex-1 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-colors"
                       >
                         Submit Prediction
                       </button>
+                    )}
+                    {!comp.userHasSubmitted && COMPETITION_LOCKED && (
+                      <span className="flex-1 px-3 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-semibold text-center">
+                        🔒 No submission
+                      </span>
                     )}
                     {comp.userHasSubmitted && (
                       <button

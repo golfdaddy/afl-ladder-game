@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
+import { COMPETITION_LOCKED } from '../config'
 
 interface LeaderboardEntry {
   userId: number
@@ -37,6 +38,13 @@ interface Competition {
   description?: string
   isPublic: boolean
   joinCode: string
+}
+
+interface MemberPrediction {
+  userId: number
+  displayName: string
+  submittedAt: string
+  ladder: string[]
 }
 
 const RankBadge = ({ rank }: { rank: number }) => {
@@ -90,6 +98,16 @@ export default function CompetitionPage() {
     }
   })
 
+  // Fetch all member predictions (only when locked — reveals everyone's submission)
+  const { data: memberPredictionsData } = useQuery({
+    queryKey: ['competition', id, 'predictions'],
+    queryFn: async () => {
+      const response = await api.get(`/competitions/${id}/predictions`)
+      return response.data.predictions as MemberPrediction[]
+    },
+    enabled: COMPETITION_LOCKED,
+  })
+
   // Send invite mutation
   const inviteMutation = useMutation({
     mutationFn: (email: string) =>
@@ -111,6 +129,7 @@ export default function CompetitionPage() {
   const members: Member[] = compData?.members || []
   const pendingInvites: PendingInvite[] = compData?.pendingInvites || []
   const leaderboard: LeaderboardEntry[] = leaderboardData || []
+  const memberPredictions: MemberPrediction[] = memberPredictionsData || []
 
   const handleCopyCode = () => {
     if (competition) {
@@ -371,17 +390,27 @@ export default function CompetitionPage() {
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full" />
-                  <span className="text-sm font-semibold text-emerald-700">Prediction submitted</span>
+                  <span className="text-sm font-semibold text-emerald-700">Prediction submitted ✓</span>
                 </div>
                 <p className="text-xs text-slate-400 mb-5">
-                  Last updated: {formatDate(me.predictionUpdatedAt)}
+                  {COMPETITION_LOCKED ? 'Competition is locked — view only' : `Last updated: ${formatDate(me.predictionUpdatedAt)}`}
                 </p>
                 <button
                   onClick={() => navigate('/prediction/1')}
                   className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors"
                 >
-                  View / Edit Prediction
+                  {COMPETITION_LOCKED ? '👁 View My Ladder' : 'View / Edit Prediction'}
                 </button>
+              </div>
+            ) : COMPETITION_LOCKED ? (
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-2.5 h-2.5 bg-red-400 rounded-full" />
+                  <span className="text-sm font-semibold text-red-600">No submission</span>
+                </div>
+                <p className="text-xs text-slate-400">
+                  The competition closed on March 10 without a submission from you.
+                </p>
               </div>
             ) : (
               <div>
@@ -562,6 +591,67 @@ export default function CompetitionPage() {
             </p>
           </div>
         </div>
+
+        {/* ── Member Ladders (revealed after lockout) ── */}
+        {COMPETITION_LOCKED && (
+          <div className="mt-6 bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-3">
+              <div className="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center">
+                <span className="text-base">🔒</span>
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Everyone's Ladder</h2>
+                <p className="text-sm text-slate-500 mt-0.5">All submissions revealed — competition is closed</p>
+              </div>
+            </div>
+
+            {memberPredictions.length === 0 ? (
+              <div className="px-6 py-12 text-center text-slate-400 text-sm">
+                No submitted ladders found.
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {memberPredictions.map((mp) => (
+                  <div key={mp.userId} className={`px-6 py-5 ${mp.userId === currentUser?.id ? 'bg-emerald-50/40' : ''}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center flex-shrink-0">
+                          <span className="text-xs font-bold text-slate-500">
+                            {mp.displayName.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                        <span className="font-bold text-slate-900 text-sm">{mp.displayName}</span>
+                        {mp.userId === currentUser?.id && (
+                          <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">You</span>
+                        )}
+                      </div>
+                      <span className="text-xs text-slate-400">
+                        Submitted {formatDate(mp.submittedAt)}
+                      </span>
+                    </div>
+                    {/* Ladder positions in a compact grid */}
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                      {mp.ladder.map((teamName, idx) => {
+                        const pos = idx + 1
+                        const badgeClass =
+                          pos <= 4 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+                          pos <= 8 ? 'bg-blue-50 border-blue-200 text-blue-800' :
+                          pos <= 14 ? 'bg-slate-50 border-slate-200 text-slate-600' :
+                          'bg-red-50 border-red-200 text-red-700'
+                        return (
+                          <div key={pos} className={`flex items-center gap-1.5 border rounded-lg px-2 py-1 ${badgeClass}`}>
+                            <span className="text-xs font-black w-4 flex-shrink-0">{pos}</span>
+                            <span className="text-xs font-semibold truncate">{teamName.split(' ').pop()}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </div>
   )

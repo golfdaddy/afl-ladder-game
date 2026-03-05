@@ -26,6 +26,9 @@ router.get('/users/:userId/email-groups', authMiddleware, requireAdmin, AdminCon
 router.post('/users/:userId/email-groups/:groupId', authMiddleware, requireAdmin, AdminController.addUserToEmailGroup)
 router.delete('/users/:userId/email-groups/:groupId', authMiddleware, requireAdmin, AdminController.removeUserFromEmailGroup)
 
+// Export all ladder predictions as CSV/JSON (admin only)
+router.get('/export/predictions', authMiddleware, requireAdmin, AdminController.exportPredictions)
+
 // Promote by email — callable with just X-Admin-Secret (for first-time setup)
 router.post('/promote-email', adminAuth, AdminController.promoteByEmail)
 

@@ -17,6 +17,9 @@ router.post('/invites/:token/decline', authMiddleware, CompetitionInviteControll
 router.post('/:id/invite', authMiddleware, CompetitionInviteController.invite)
 router.get('/:id/invites', authMiddleware, CompetitionInviteController.getCompetitionInvites)
 
+// Member predictions (revealed post-lockout)
+router.get('/:id/predictions', authMiddleware, CompetitionController.getCompetitionPredictions)
+
 // This must be LAST since :id is a catch-all param
 router.get('/:id', authMiddleware, CompetitionController.getById)
 
