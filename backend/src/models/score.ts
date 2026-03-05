@@ -168,6 +168,7 @@ export class ScoreModel {
        FROM predictions p
        JOIN users u ON p.user_id = u.id
        WHERE p.season_id = $1 AND p.total_score IS NOT NULL
+         AND LOWER(u.display_name) != 'barry'
        ORDER BY p.total_score ASC
        LIMIT $2`,
       [seasonId, limit]
