@@ -802,7 +802,7 @@ export default function DashboardPage() {
                     const isMe = entry.userId === user?.id
                     const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null
                     return (
-                      <div key={entry.userId} className={`flex items-center gap-3 px-5 py-3 ${isMe ? 'bg-emerald-50/60' : ''}`}>
+                      <div key={entry.userId} className={`flex items-center gap-3 px-5 py-3 ${isMe ? 'bg-emerald-50/60' : 'hover:bg-slate-50'} transition-colors`}>
                         <div className="w-7 text-center flex-shrink-0">
                           {medal ? (
                             <span className="text-base">{medal}</span>
@@ -810,9 +810,14 @@ export default function DashboardPage() {
                             <span className="text-xs font-bold text-slate-400">#{idx + 1}</span>
                           )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="font-semibold text-slate-900 text-sm truncate">{entry.displayName}</span>
-                          {isMe && <span className="ml-2 text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold">You</span>}
+                        <div className="flex-1 min-w-0 flex items-center gap-2">
+                          <button
+                            onClick={() => navigate(`/ladder/${entry.userId}`)}
+                            className="font-semibold text-slate-900 text-sm truncate hover:text-emerald-700 hover:underline transition-colors text-left"
+                          >
+                            {entry.displayName}
+                          </button>
+                          {isMe && <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>}
                         </div>
                         <div className="text-right flex-shrink-0">
                           <span className="text-base font-black text-slate-900">{entry.totalPoints}</span>
@@ -839,12 +844,17 @@ export default function DashboardPage() {
                   {spotlightPredictions.map((mp) => {
                     const isMe = mp.userId === user?.id
                     return (
-                      <div key={mp.userId} className={`px-5 py-4 ${isMe ? 'bg-emerald-50/40' : ''}`}>
+                      <div key={mp.userId} className={`px-5 py-4 ${isMe ? 'bg-emerald-50/40' : 'hover:bg-slate-50'} transition-colors`}>
                         <div className="flex items-center gap-2 mb-2.5">
                           <div className="w-7 h-7 bg-slate-100 rounded-full flex items-center justify-center flex-shrink-0">
                             <span className="text-xs font-bold text-slate-500">{mp.displayName.charAt(0).toUpperCase()}</span>
                           </div>
-                          <span className="font-bold text-slate-900 text-sm">{mp.displayName}</span>
+                          <button
+                            onClick={() => navigate(`/ladder/${mp.userId}`)}
+                            className="font-bold text-slate-900 text-sm hover:text-emerald-700 hover:underline transition-colors"
+                          >
+                            {mp.displayName}
+                          </button>
                           {isMe && <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold">You</span>}
                         </div>
                         <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">

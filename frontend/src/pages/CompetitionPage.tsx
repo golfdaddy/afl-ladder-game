@@ -569,7 +569,12 @@ export default function CompetitionPage() {
                   <RankBadge rank={index + 1} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-900 text-sm truncate">{entry.displayName}</span>
+                      <button
+                        onClick={() => navigate(`/ladder/${entry.userId}`)}
+                        className="font-semibold text-slate-900 text-sm truncate hover:text-emerald-700 hover:underline transition-colors text-left"
+                      >
+                        {entry.displayName}
+                      </button>
                       {entry.userId === currentUser?.id && (
                         <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>
                       )}
@@ -620,7 +625,12 @@ export default function CompetitionPage() {
                             {mp.displayName.charAt(0).toUpperCase()}
                           </span>
                         </div>
-                        <span className="font-bold text-slate-900 text-sm">{mp.displayName}</span>
+                        <button
+                          onClick={() => navigate(`/ladder/${mp.userId}`)}
+                          className="font-bold text-slate-900 text-sm hover:text-emerald-700 hover:underline transition-colors"
+                        >
+                          {mp.displayName}
+                        </button>
                         {mp.userId === currentUser?.id && (
                           <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">You</span>
                         )}

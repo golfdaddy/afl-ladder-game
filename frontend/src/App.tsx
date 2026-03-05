@@ -11,6 +11,7 @@ import PredictionPage from './pages/PredictionPage'
 import LeaderboardPage from './pages/LeaderboardPage'
 import InviteAcceptPage from './pages/InviteAcceptPage'
 import AdminPage from './pages/AdminPage'
+import UserLadderPage from './pages/UserLadderPage'
 import NotFoundPage from './pages/NotFoundPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
@@ -72,6 +73,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <LeaderboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/ladder/:userId"
+            element={
+              <ProtectedRoute>
+                <UserLadderPage />
               </ProtectedRoute>
             }
           />

@@ -3,6 +3,7 @@ import { AuthRequest } from '../middleware/auth'
 import { PredictionModel, PredictedTeam } from '../models/prediction'
 import { SeasonModel } from '../models/season'
 import { AFLLadderModel } from '../models/aflLadder'
+import { db } from '../db'
 
 export class PredictionController {
   static async submit(req: AuthRequest, res: Response) {
@@ -102,6 +103,82 @@ export class PredictionController {
               diff,            // negative = team ranked higher than predicted
               points,          // penalty points for this team
             }
+          })
+
+          enriched = {
+            ...enriched,
+            teams: scoredTeams,
+            totalScore: hasAllPositions ? total : null,
+            ladderRound: ladder.round,
+            ladderUpdatedAt: ladder.capturedAt,
+          }
+        }
+      } catch {
+        // No ladder data — return unenriched prediction
+      }
+
+      res.json({ prediction: enriched })
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch prediction' })
+    }
+  }
+
+  /**
+   * Get another user's prediction for viewing (post-lockout).
+   * Returns the target user's prediction enriched with AFL ladder data,
+   * plus their display name.
+   */
+  static async getByUserForViewing(req: AuthRequest, res: Response) {
+    try {
+      if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+
+      const { seasonId, userId } = req.params
+      const targetUserId = parseInt(userId)
+
+      // Get user display name
+      const userResult = await db.query(
+        'SELECT display_name as "displayName" FROM users WHERE id = $1',
+        [targetUserId]
+      )
+      if (!userResult.rows[0]) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+      const displayName = userResult.rows[0].displayName
+
+      const prediction = await PredictionModel.findByUserAndSeason(targetUserId, parseInt(seasonId))
+      if (!prediction) {
+        return res.status(404).json({ error: 'Prediction not found' })
+      }
+
+      // Enrich with actual ladder positions if available
+      let enriched: any = {
+        ...prediction,
+        displayName,
+        totalScore: null,
+        ladderRound: null,
+        ladderUpdatedAt: null,
+      }
+
+      try {
+        const ladder = await AFLLadderModel.getLatestLadder(parseInt(seasonId))
+        if (ladder && ladder.teams.length > 0) {
+          const actualPos: Record<string, number> = {}
+          for (const t of ladder.teams) {
+            actualPos[t.teamName] = t.position
+          }
+
+          let total = 0
+          let hasAllPositions = true
+
+          const scoredTeams = prediction.teams.map((t) => {
+            const actual = actualPos[t.teamName] ?? null
+            const diff = actual !== null ? actual - t.position : null
+            const points = diff !== null ? Math.abs(diff) : null
+
+            if (points !== null) total += points
+            else hasAllPositions = false
+
+            return { ...t, actualPosition: actual, diff, points }
           })
 
           enriched = {
