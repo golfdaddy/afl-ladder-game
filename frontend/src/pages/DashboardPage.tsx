@@ -47,6 +47,19 @@ interface PendingInvite {
   invitedByName: string
 }
 
+interface LeaderboardEntry {
+  userId: number
+  displayName: string
+  totalPoints: number
+}
+
+interface MemberPrediction {
+  userId: number
+  displayName: string
+  submittedAt: string
+  ladder: string[]
+}
+
 export default function DashboardPage() {
   const user = useAuthStore((state) => state.user)
   const isAdmin = useAuthStore((state) => state.isAdmin)
@@ -61,6 +74,8 @@ export default function DashboardPage() {
   const [createError, setCreateError] = useState('')
   const [joinError, setJoinError] = useState('')
   const [copiedId, setCopiedId] = useState<number | null>(null)
+  // Collapse competitions list by default when locked (spotlight section is the main view)
+  const [showComps, setShowComps] = useState(!COMPETITION_LOCKED)
 
   // Fetch user's competitions
   const { data: competitions = [], isLoading } = useQuery({
@@ -78,6 +93,29 @@ export default function DashboardPage() {
       const response = await api.get('/competitions/invites/mine')
       return response.data.invites || []
     }
+  })
+
+  // First competition (for the locked dashboard spotlight)
+  const firstComp = (competitions as Competition[])[0]
+
+  // Leaderboard for first competition (only when locked)
+  const { data: spotlightLeaderboard = [] } = useQuery({
+    queryKey: ['leaderboard', 'competition', firstComp?.id],
+    queryFn: async () => {
+      const response = await api.get(`/leaderboards/competition/${firstComp.id}`)
+      return (response.data.leaderboard || []) as LeaderboardEntry[]
+    },
+    enabled: COMPETITION_LOCKED && !!firstComp,
+  })
+
+  // Member predictions for first competition (only when locked)
+  const { data: spotlightPredictions = [] } = useQuery({
+    queryKey: ['competition', firstComp?.id, 'predictions'],
+    queryFn: async () => {
+      const response = await api.get(`/competitions/${firstComp.id}/predictions`)
+      return (response.data.predictions || []) as MemberPrediction[]
+    },
+    enabled: COMPETITION_LOCKED && !!firstComp,
   })
 
   // Accept invite mutation
@@ -274,7 +312,7 @@ export default function DashboardPage() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-red-400">🔒 Competition locked</p>
                 <p className="text-slate-300 text-sm font-medium">
-                  Submissions closed on <span className="font-bold text-white">Mon 10 March at midnight AEDT</span>
+                  The 2026 AFL season is underway — good luck!
                 </p>
               </div>
             </div>
@@ -575,16 +613,29 @@ export default function DashboardPage() {
 
         {/* Competitions List */}
         <div>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-bold text-slate-700 uppercase tracking-widest">Your Competitions</h2>
-            {(competitions as Competition[]).length > 0 && (
-              <span className="text-xs text-slate-400 font-medium">
-                {(competitions as Competition[]).length} competition{(competitions as Competition[]).length !== 1 ? 's' : ''}
-              </span>
-            )}
-          </div>
+          <button
+            onClick={() => setShowComps(v => !v)}
+            className="flex items-center justify-between w-full mb-4 group"
+          >
+            <h2 className="text-sm font-bold text-slate-700 uppercase tracking-widest group-hover:text-slate-900 transition-colors">
+              Your Competitions
+            </h2>
+            <div className="flex items-center gap-2">
+              {(competitions as Competition[]).length > 0 && (
+                <span className="text-xs text-slate-400 font-medium">
+                  {(competitions as Competition[]).length} competition{(competitions as Competition[]).length !== 1 ? 's' : ''}
+                </span>
+              )}
+              <svg
+                className={`w-4 h-4 text-slate-400 transition-transform ${showComps ? 'rotate-180' : ''}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </button>
 
-          {isLoading ? (
+          {!showComps ? null : isLoading ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {[1, 2, 3].map(i => (
                 <div key={i} className="bg-white rounded-2xl border border-slate-200 p-6 animate-pulse">
@@ -670,7 +721,7 @@ export default function DashboardPage() {
 
                   {/* Actions */}
                   <div className="px-5 pb-5 flex gap-2">
-                    {!comp.userHasSubmitted && !COMPETITION_LOCKED && (
+                    {!COMPETITION_LOCKED && !comp.userHasSubmitted && (
                       <button
                         onClick={(e) => { e.stopPropagation(); navigate('/prediction/1') }}
                         className="flex-1 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-colors"
@@ -678,12 +729,7 @@ export default function DashboardPage() {
                         Submit Prediction
                       </button>
                     )}
-                    {!comp.userHasSubmitted && COMPETITION_LOCKED && (
-                      <span className="flex-1 px-3 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-semibold text-center">
-                        🔒 No submission
-                      </span>
-                    )}
-                    {comp.userHasSubmitted && (
+                    {!COMPETITION_LOCKED && comp.userHasSubmitted && (
                       <button
                         onClick={(e) => handleCopyCode(comp, e)}
                         className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
@@ -721,6 +767,110 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+
+        {/* ── Competition Spotlight (locked: show leaderboard + ladders for first comp) ── */}
+        {COMPETITION_LOCKED && firstComp && (
+          <div className="mt-8 space-y-6">
+            <div className="flex items-center gap-3">
+              <h2 className="text-sm font-bold text-slate-700 uppercase tracking-widest">
+                {firstComp.name}
+              </h2>
+              <button
+                onClick={() => navigate(`/competition/${firstComp.id}`)}
+                className="text-xs text-emerald-600 hover:text-emerald-700 font-semibold"
+              >
+                Full view →
+              </button>
+            </div>
+
+            {/* Leaderboard */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+                <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                <h3 className="font-bold text-slate-900 text-sm">Leaderboard</h3>
+                <span className="text-xs text-slate-400 ml-1">· lower is better</span>
+              </div>
+              {spotlightLeaderboard.length === 0 ? (
+                <div className="px-5 py-8 text-center text-slate-400 text-sm">
+                  Scores will appear once the AFL season starts.
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-50">
+                  {spotlightLeaderboard.map((entry, idx) => {
+                    const isMe = entry.userId === user?.id
+                    const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null
+                    return (
+                      <div key={entry.userId} className={`flex items-center gap-3 px-5 py-3 ${isMe ? 'bg-emerald-50/60' : ''}`}>
+                        <div className="w-7 text-center flex-shrink-0">
+                          {medal ? (
+                            <span className="text-base">{medal}</span>
+                          ) : (
+                            <span className="text-xs font-bold text-slate-400">#{idx + 1}</span>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="font-semibold text-slate-900 text-sm truncate">{entry.displayName}</span>
+                          {isMe && <span className="ml-2 text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold">You</span>}
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <span className="text-base font-black text-slate-900">{entry.totalPoints}</span>
+                          <span className="text-xs text-slate-400 ml-1">pts</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Everyone's Ladders */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+                <span className="text-base">🔒</span>
+                <h3 className="font-bold text-slate-900 text-sm">Everyone's Ladder</h3>
+                <span className="text-xs text-slate-400 ml-1">· all submissions revealed</span>
+              </div>
+              {spotlightPredictions.length === 0 ? (
+                <div className="px-5 py-8 text-center text-slate-400 text-sm">No submissions found.</div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {spotlightPredictions.map((mp) => {
+                    const isMe = mp.userId === user?.id
+                    return (
+                      <div key={mp.userId} className={`px-5 py-4 ${isMe ? 'bg-emerald-50/40' : ''}`}>
+                        <div className="flex items-center gap-2 mb-2.5">
+                          <div className="w-7 h-7 bg-slate-100 rounded-full flex items-center justify-center flex-shrink-0">
+                            <span className="text-xs font-bold text-slate-500">{mp.displayName.charAt(0).toUpperCase()}</span>
+                          </div>
+                          <span className="font-bold text-slate-900 text-sm">{mp.displayName}</span>
+                          {isMe && <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold">You</span>}
+                        </div>
+                        <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
+                          {mp.ladder.map((teamName, idx) => {
+                            const pos = idx + 1
+                            const cls =
+                              pos <= 4  ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+                              pos <= 8  ? 'bg-blue-50 border-blue-200 text-blue-800' :
+                              pos <= 14 ? 'bg-slate-50 border-slate-200 text-slate-600' :
+                              'bg-red-50 border-red-200 text-red-700'
+                            return (
+                              <div key={pos} className={`flex items-center gap-1 border rounded-lg px-2 py-1 ${cls}`}>
+                                <span className="text-xs font-black w-4 flex-shrink-0">{pos}</span>
+                                <span className="text-xs font-semibold truncate">{teamName.split(' ').pop()}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   )
