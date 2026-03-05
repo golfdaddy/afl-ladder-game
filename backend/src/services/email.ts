@@ -2,13 +2,16 @@ import nodemailer from 'nodemailer'
 
 function createTransporter() {
   return nodemailer.createTransport({
-    host:   process.env.SMTP_HOST || 'smtp.gmail.com',
-    port:   parseInt(process.env.SMTP_PORT  || '587'),
-    secure: process.env.SMTP_SECURE === 'true',
+    host:              process.env.SMTP_HOST || 'smtp.gmail.com',
+    port:              parseInt(process.env.SMTP_PORT || '587'),
+    secure:            process.env.SMTP_SECURE === 'true',
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
+    connectionTimeout: 10000, // 10s to establish TCP connection
+    greetingTimeout:   10000, // 10s to receive SMTP greeting
+    socketTimeout:     15000, // 15s idle socket before giving up
   })
 }
 

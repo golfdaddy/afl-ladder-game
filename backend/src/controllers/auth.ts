@@ -144,9 +144,14 @@ export class AuthController {
 
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173'
       const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`
-      await sendPasswordResetEmail(user.email, resetUrl)
 
+      // Respond immediately — don't block on the email send (SMTP can be slow/hang)
       res.json(okMsg)
+
+      // Fire-and-forget: send email in background after response is sent
+      sendPasswordResetEmail(user.email, resetUrl).catch((err) => {
+        console.error('[ForgotPassword] Email send failed:', err.message)
+      })
     } catch (error) {
       console.error('Forgot password error:', error)
       res.status(500).json({ error: 'Failed to process request' })
