@@ -3,7 +3,7 @@ import { useAuthStore } from '../store/auth'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
-import { COMPETITION_LOCKED, CUTOFF } from '../config'
+import { COMPETITION_LOCKED, SEASON_OVER, CUTOFF } from '../config'
 
 function useCountdown(target: Date) {
   const calc = () => {
@@ -384,41 +384,45 @@ export default function DashboardPage() {
           </div>
         ) : null}
 
-        {/* Quick Actions */}
+        {/* Quick Actions — Create/Join hidden during active season, re-appear after season ends */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-8">
-          <button
-            onClick={() => togglePanel('create')}
-            className={`flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all ${
-              activePanel === 'create'
-                ? 'border-emerald-500 bg-emerald-50'
-                : 'border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/50'
-            }`}
-          >
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${activePanel === 'create' ? 'bg-emerald-500' : 'bg-emerald-100'}`}>
-              <svg className={`w-5 h-5 ${activePanel === 'create' ? 'text-white' : 'text-emerald-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-            </div>
-            <span className="font-bold text-slate-900 text-sm">Create</span>
-            <span className="text-xs text-slate-400 mt-0.5">New competition</span>
-          </button>
+          {(!COMPETITION_LOCKED || SEASON_OVER) && (
+            <button
+              onClick={() => togglePanel('create')}
+              className={`flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all ${
+                activePanel === 'create'
+                  ? 'border-emerald-500 bg-emerald-50'
+                  : 'border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/50'
+              }`}
+            >
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${activePanel === 'create' ? 'bg-emerald-500' : 'bg-emerald-100'}`}>
+                <svg className={`w-5 h-5 ${activePanel === 'create' ? 'text-white' : 'text-emerald-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </div>
+              <span className="font-bold text-slate-900 text-sm">Create</span>
+              <span className="text-xs text-slate-400 mt-0.5">New competition</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => togglePanel('join')}
-            className={`flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all ${
-              activePanel === 'join'
-                ? 'border-emerald-500 bg-emerald-50'
-                : 'border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/50'
-            }`}
-          >
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${activePanel === 'join' ? 'bg-emerald-500' : 'bg-slate-100'}`}>
-              <svg className={`w-5 h-5 ${activePanel === 'join' ? 'text-white' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0" />
-              </svg>
-            </div>
-            <span className="font-bold text-slate-900 text-sm">Join</span>
-            <span className="text-xs text-slate-400 mt-0.5">Use a code</span>
-          </button>
+          {(!COMPETITION_LOCKED || SEASON_OVER) && (
+            <button
+              onClick={() => togglePanel('join')}
+              className={`flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all ${
+                activePanel === 'join'
+                  ? 'border-emerald-500 bg-emerald-50'
+                  : 'border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/50'
+              }`}
+            >
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${activePanel === 'join' ? 'bg-emerald-500' : 'bg-slate-100'}`}>
+                <svg className={`w-5 h-5 ${activePanel === 'join' ? 'text-white' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0" />
+                </svg>
+              </div>
+              <span className="font-bold text-slate-900 text-sm">Join</span>
+              <span className="text-xs text-slate-400 mt-0.5">Use a code</span>
+            </button>
+          )}
 
           <button
             onClick={() => navigate('/prediction/1')}
@@ -857,18 +861,20 @@ export default function DashboardPage() {
                           </button>
                           {isMe && <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold">You</span>}
                         </div>
-                        <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
+                        {/* Ladder — vertical list 1–18 */}
+                        <div className="divide-y divide-slate-50 rounded-xl overflow-hidden border border-slate-100">
                           {mp.ladder.map((teamName, idx) => {
                             const pos = idx + 1
-                            const cls =
-                              pos <= 4  ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
-                              pos <= 8  ? 'bg-blue-50 border-blue-200 text-blue-800' :
-                              pos <= 14 ? 'bg-slate-50 border-slate-200 text-slate-600' :
-                              'bg-red-50 border-red-200 text-red-700'
+                            const rowClass =
+                              pos <= 4  ? 'bg-emerald-50/60' :
+                              pos <= 8  ? 'bg-blue-50/40' :
+                              pos <= 14 ? 'bg-white' :
+                                          'bg-red-50/30'
                             return (
-                              <div key={pos} className={`flex items-center gap-1 border rounded-lg px-2 py-1 ${cls}`}>
-                                <span className="text-xs font-black w-4 flex-shrink-0">{pos}</span>
-                                <span className="text-xs font-semibold truncate">{teamName.split(' ').pop()}</span>
+                              <div key={pos} className={`flex items-center gap-3 px-3 py-1.5 ${rowClass}`}>
+                                <span className="text-xs font-black text-slate-400 w-5 text-right flex-shrink-0">{pos}</span>
+                                <div className="w-px h-3.5 bg-slate-200 flex-shrink-0" />
+                                <span className="text-sm font-semibold text-slate-800">{teamName}</span>
                               </div>
                             )
                           })}

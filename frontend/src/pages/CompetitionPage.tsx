@@ -639,19 +639,20 @@ export default function CompetitionPage() {
                         Submitted {formatDate(mp.submittedAt)}
                       </span>
                     </div>
-                    {/* Ladder positions in a compact grid */}
-                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                    {/* Ladder — vertical list 1–18 */}
+                    <div className="divide-y divide-slate-50 rounded-xl overflow-hidden border border-slate-100">
                       {mp.ladder.map((teamName, idx) => {
                         const pos = idx + 1
-                        const badgeClass =
-                          pos <= 4 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
-                          pos <= 8 ? 'bg-blue-50 border-blue-200 text-blue-800' :
-                          pos <= 14 ? 'bg-slate-50 border-slate-200 text-slate-600' :
-                          'bg-red-50 border-red-200 text-red-700'
+                        const rowClass =
+                          pos <= 4  ? 'bg-emerald-50/60' :
+                          pos <= 8  ? 'bg-blue-50/40' :
+                          pos <= 14 ? 'bg-white' :
+                                      'bg-red-50/30'
                         return (
-                          <div key={pos} className={`flex items-center gap-1.5 border rounded-lg px-2 py-1 ${badgeClass}`}>
-                            <span className="text-xs font-black w-4 flex-shrink-0">{pos}</span>
-                            <span className="text-xs font-semibold truncate">{teamName.split(' ').pop()}</span>
+                          <div key={pos} className={`flex items-center gap-3 px-3 py-1.5 ${rowClass}`}>
+                            <span className="text-xs font-black text-slate-400 w-5 text-right flex-shrink-0">{pos}</span>
+                            <div className="w-px h-3.5 bg-slate-200 flex-shrink-0" />
+                            <span className="text-sm font-semibold text-slate-800">{teamName}</span>
                           </div>
                         )
                       })}

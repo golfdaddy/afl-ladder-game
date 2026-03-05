@@ -189,8 +189,12 @@ export default function LeaderboardPage() {
                     <p className="text-sm text-slate-400">{item.competitionCount} competition{item.competitionCount !== 1 ? 's' : ''}</p>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="text-2xl font-black text-slate-900">{item.totalPoints}</p>
-                    <p className="text-xs text-slate-400">avg {(Number(item.avgPoints) || 0).toFixed(1)}</p>
+                    {item.totalPoints != null ? (
+                      <p className="text-2xl font-black text-slate-900">{item.totalPoints}</p>
+                    ) : (
+                      <p className="text-sm font-semibold text-slate-400">—</p>
+                    )}
+                    <p className="text-xs text-slate-400">{item.competitionCount} comp{item.competitionCount !== 1 ? 's' : ''}</p>
                   </div>
                 </div>
               ))}
