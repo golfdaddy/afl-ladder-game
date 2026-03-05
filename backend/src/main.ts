@@ -19,9 +19,10 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Health check
+// Health check — BUILD_TIME is injected at compile time to verify Railway has the latest deploy
+const BUILD_TIME = new Date().toISOString();
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), buildTime: BUILD_TIME });
 });
 
 // Routes
