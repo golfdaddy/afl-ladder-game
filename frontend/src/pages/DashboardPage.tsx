@@ -118,6 +118,26 @@ export default function DashboardPage() {
     enabled: COMPETITION_LOCKED && !!firstComp,
   })
 
+  // Fetch current AFL ladder for side-by-side comparison
+  const { data: aflLadderData } = useQuery({
+    queryKey: ['afl-ladder', '1'],
+    queryFn: async () => {
+      const response = await api.get('/admin/afl-ladder/1')
+      return response.data
+    },
+    enabled: COMPETITION_LOCKED,
+    retry: false,
+  })
+
+  // AFL current ladder — sorted by position ascending → array of team names
+  const aflTeams: string[] = (() => {
+    const teams = aflLadderData?.ladder?.teams
+    if (!Array.isArray(teams) || teams.length === 0) return []
+    return [...teams]
+      .sort((a: any, b: any) => a.position - b.position)
+      .map((t: any) => t.teamName)
+  })()
+
   // Accept invite mutation
   const acceptInviteMutation = useMutation({
     mutationFn: (token: string) => api.post(`/competitions/invites/${token}/accept`),
@@ -842,54 +862,120 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Everyone's Ladders */}
+            {/* Everyone's Ladders — horizontal scroll comparison */}
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2 flex-wrap">
                 <span className="text-base">🔒</span>
                 <h3 className="font-bold text-slate-900 text-sm">League Ladders</h3>
-                <span className="text-xs text-slate-400 ml-1">· all submissions revealed</span>
+                <span className="text-xs text-slate-400">· scroll right to compare</span>
+                {aflTeams.length > 0 && (
+                  <span className="inline-flex items-center gap-1 text-xs text-emerald-600 font-medium ml-1">
+                    <span className="w-2 h-2 bg-emerald-500 rounded-full inline-block" />
+                    = matches AFL Now
+                  </span>
+                )}
               </div>
               {spotlightPredictions.length === 0 ? (
                 <div className="px-5 py-8 text-center text-slate-400 text-sm">No submissions found.</div>
               ) : (
-                <div className="divide-y divide-slate-100">
-                  {spotlightPredictions.map((mp) => {
-                    const isMe = mp.userId === user?.id
-                    return (
-                      <div key={mp.userId} className={`px-5 py-4 ${isMe ? 'bg-emerald-50/40' : 'hover:bg-slate-50'} transition-colors`}>
-                        <div className="flex items-center gap-2 mb-2.5">
-                          <div className="w-7 h-7 bg-slate-100 rounded-full flex items-center justify-center flex-shrink-0">
-                            <span className="text-xs font-bold text-slate-500">{mp.displayName.charAt(0).toUpperCase()}</span>
-                          </div>
-                          <button
-                            onClick={() => navigate(`/ladder/${mp.userId}`)}
-                            className="font-bold text-slate-900 text-sm hover:text-emerald-700 hover:underline transition-colors"
-                          >
-                            {mp.displayName}
-                          </button>
-                          {isMe && <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold">You</span>}
+                <div className="flex">
+                  {/* ── LEFT: sticky position # + AFL Now columns ── */}
+                  <div
+                    className="flex-shrink-0 z-10 bg-white"
+                    style={{ boxShadow: '3px 0 8px -3px rgba(0,0,0,0.15)' }}
+                  >
+                    <div className="flex">
+                      {/* Position # column */}
+                      <div className="w-10 flex flex-col">
+                        <div className="h-14 flex items-end pb-3 px-2 border-b border-slate-100 bg-white">
+                          <span className="text-xs font-bold text-slate-400">#</span>
                         </div>
-                        {/* Ladder — vertical list 1–18 */}
-                        <div className="divide-y divide-slate-50 rounded-xl overflow-hidden border border-slate-100">
-                          {mp.ladder.map((teamName, idx) => {
-                            const pos = idx + 1
-                            const rowClass =
-                              pos <= 4  ? 'bg-emerald-50/60' :
-                              pos <= 8  ? 'bg-blue-50/40' :
-                              pos <= 14 ? 'bg-white' :
-                                          'bg-red-50/30'
-                            return (
-                              <div key={pos} className={`flex items-center gap-3 px-3 py-1.5 ${rowClass}`}>
-                                <span className="text-xs font-black text-slate-400 w-5 text-right flex-shrink-0">{pos}</span>
-                                <div className="w-px h-3.5 bg-slate-200 flex-shrink-0" />
-                                <span className="text-sm font-semibold text-slate-800">{teamName}</span>
-                              </div>
-                            )
-                          })}
-                        </div>
+                        {Array.from({ length: 18 }, (_, i) => {
+                          const pos = i + 1
+                          const zoneClass =
+                            pos <= 4  ? 'bg-emerald-50/80' :
+                            pos <= 8  ? 'bg-blue-50/50' :
+                            pos <= 14 ? 'bg-white' :
+                                        'bg-red-50/50'
+                          return (
+                            <div key={pos} className={`h-9 flex items-center justify-end pr-2 border-b border-slate-50 ${zoneClass}`}>
+                              <span className="text-xs font-black text-slate-400">{pos}</span>
+                            </div>
+                          )
+                        })}
                       </div>
-                    )
-                  })}
+                      {/* AFL Now column */}
+                      {aflTeams.length > 0 && (
+                        <div className="w-32 flex flex-col bg-slate-900">
+                          <div className="h-14 flex flex-col justify-end px-3 pb-3 border-b border-slate-700">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-0.5">AFL</p>
+                            <p className="text-xs font-bold text-white leading-none">Now</p>
+                          </div>
+                          {aflTeams.map((team, i) => (
+                            <div key={i} className={`h-9 flex items-center px-3 border-b border-slate-800 ${i % 2 === 0 ? 'bg-slate-900' : 'bg-slate-800/60'}`}>
+                              <span className="text-xs font-semibold text-white truncate">{team}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* ── RIGHT: scrollable user columns ── */}
+                  <div className="overflow-x-auto flex-1">
+                    <div className="flex">
+                      {spotlightPredictions.map((mp) => {
+                        const entry = (spotlightLeaderboard as LeaderboardEntry[]).find((l) => l.userId === mp.userId)
+                        const isMe = mp.userId === user?.id
+                        return (
+                          <div key={mp.userId} className="flex-shrink-0 w-36 border-l border-slate-100">
+                            {/* Column header */}
+                            <div className={`h-14 flex flex-col justify-end px-3 pb-3 border-b border-slate-100 ${isMe ? 'bg-emerald-50' : 'bg-slate-50'}`}>
+                              <button
+                                onClick={() => navigate(`/ladder/${mp.userId}`)}
+                                className="text-xs font-bold text-slate-900 truncate text-left hover:text-emerald-700 transition-colors"
+                              >
+                                {mp.displayName}
+                              </button>
+                              <div className="flex items-center gap-1 mt-0.5">
+                                {isMe && <span className="text-[10px] font-semibold text-emerald-600">You</span>}
+                                {entry?.totalPoints != null && (
+                                  <span className="text-[10px] text-slate-400 font-semibold">
+                                    {isMe ? '· ' : ''}{entry.totalPoints} pts
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            {/* Ladder rows */}
+                            {mp.ladder.map((team, i) => {
+                              const pos = i + 1
+                              const matchesAFL = aflTeams.length > 0 && aflTeams[i] === team
+                              const zoneClass =
+                                pos <= 4  ? 'bg-emerald-50/60' :
+                                pos <= 8  ? 'bg-blue-50/40' :
+                                pos <= 14 ? 'bg-white' :
+                                            'bg-red-50/30'
+                              return (
+                                <div
+                                  key={i}
+                                  className={`h-9 flex items-center px-3 border-b border-slate-50 ${matchesAFL ? 'bg-emerald-100' : zoneClass}`}
+                                >
+                                  <span className={`text-xs font-semibold truncate flex-1 ${matchesAFL ? 'text-emerald-700 font-bold' : 'text-slate-700'}`}>
+                                    {team}
+                                  </span>
+                                  {matchesAFL && (
+                                    <svg className="w-3 h-3 text-emerald-500 flex-shrink-0 ml-1" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
