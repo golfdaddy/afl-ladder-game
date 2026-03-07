@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
 import { FEATURE_FANTASY7_ENABLED } from '../config'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
 
@@ -38,6 +39,7 @@ export default function AdminPage() {
   const navigate = useNavigate()
   const { user, token, isAdmin } = useAuthStore()
   const queryClient = useQueryClient()
+  const { seasonId } = useCurrentSeason()
   const [syncStatus, setSyncStatus] = useState<string | null>(null)
   const [syncLoading, setSyncLoading] = useState(false)
   const [exportLoading, setExportLoading] = useState(false)
@@ -129,7 +131,7 @@ export default function AdminPage() {
     try {
       const res = await fetchWithAuth(`${API_BASE}/admin/sync-ladder`, token!, {
         method: 'POST',
-        body: JSON.stringify({ seasonId: 1 }),
+        body: JSON.stringify({ seasonId }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Sync failed')
@@ -144,13 +146,13 @@ export default function AdminPage() {
   async function handleExportPredictions() {
     setExportLoading(true)
     try {
-      const res = await fetchWithAuth(`${API_BASE}/admin/export/predictions?format=csv&seasonId=1`, token!)
+      const res = await fetchWithAuth(`${API_BASE}/admin/export/predictions?format=csv&seasonId=${seasonId}`, token!)
       if (!res.ok) throw new Error('Export failed')
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `predictions-season1-${new Date().toISOString().slice(0, 10)}.csv`
+      a.download = `predictions-season${seasonId}-${new Date().toISOString().slice(0, 10)}.csv`
       a.click()
       URL.revokeObjectURL(url)
     } catch (err: any) {

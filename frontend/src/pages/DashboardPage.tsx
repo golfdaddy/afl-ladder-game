@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 import { COMPETITION_LOCKED, SEASON_OVER, CUTOFF, FEATURE_FANTASY7_ENABLED } from '../config'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 function useCountdown(target: Date) {
   const calc = () => {
@@ -67,6 +68,7 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const countdown = useCountdown(CUTOFF)
+  const { seasonId } = useCurrentSeason()
 
   const [activePanel, setActivePanel] = useState<'none' | 'create' | 'join'>('none')
   const [formData, setFormData] = useState({ name: '', description: '', isPublic: false })
@@ -120,12 +122,12 @@ export default function DashboardPage() {
 
   // Fetch current AFL ladder for side-by-side comparison
   const { data: aflLadderData } = useQuery({
-    queryKey: ['afl-ladder', '1'],
+    queryKey: ['afl-ladder', seasonId],
     queryFn: async () => {
-      const response = await api.get('/admin/afl-ladder/1')
+      const response = await api.get(`/admin/afl-ladder/${seasonId}`)
       return response.data
     },
-    enabled: COMPETITION_LOCKED,
+    enabled: COMPETITION_LOCKED && seasonId > 0,
     retry: false,
   })
 
@@ -158,7 +160,7 @@ export default function DashboardPage() {
   // Create competition mutation
   const createMutation = useMutation({
     mutationFn: (data: typeof formData) =>
-      api.post('/competitions', { seasonId: 1, ...data }),
+      api.post('/competitions', { seasonId, ...data }),
     onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['competitions'] })
       setActivePanel('none')
@@ -345,7 +347,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <button
-              onClick={() => navigate('/prediction/1')}
+              onClick={() => navigate(`/prediction/${seasonId}`)}
               className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl text-sm transition-colors"
             >
               View My Prediction
@@ -397,7 +399,7 @@ export default function DashboardPage() {
                 </div>
               ))}
               <button
-                onClick={() => navigate('/prediction/1')}
+                onClick={() => navigate(`/prediction/${seasonId}`)}
                 className={`ml-2 px-4 py-2 text-white font-bold rounded-xl text-sm transition-colors ${
                   countdown.days === 0
                     ? 'bg-red-500 hover:bg-red-600'
@@ -453,7 +455,7 @@ export default function DashboardPage() {
           )}
 
           <button
-            onClick={() => navigate('/prediction/1')}
+            onClick={() => navigate(`/prediction/${seasonId}`)}
             className="flex flex-col items-center justify-center p-5 rounded-2xl border-2 border-slate-200 bg-white hover:border-amber-300 hover:bg-amber-50/50 transition-all"
           >
             <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center mb-2">
@@ -634,7 +636,7 @@ export default function DashboardPage() {
                 </div>
               </div>
               <button
-                onClick={() => navigate('/prediction/1')}
+                onClick={() => navigate(`/prediction/${seasonId}`)}
                 className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm transition-colors flex-shrink-0"
               >
                 View Scores
@@ -755,7 +757,7 @@ export default function DashboardPage() {
                   <div className="px-5 pb-5 flex gap-2">
                     {!COMPETITION_LOCKED && !comp.userHasSubmitted && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); navigate('/prediction/1') }}
+                        onClick={(e) => { e.stopPropagation(); navigate(`/prediction/${seasonId}`) }}
                         className="flex-1 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-colors"
                       >
                         Submit Prediction

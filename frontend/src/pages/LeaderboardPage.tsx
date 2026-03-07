@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import api from '../services/api'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 interface Competition {
   id: number
@@ -20,6 +21,7 @@ const medalColors = [
 
 export default function LeaderboardPage() {
   const navigate = useNavigate()
+  const { seasonId } = useCurrentSeason()
 
   const { data: competitions = [], isLoading: compsLoading } = useQuery({
     queryKey: ['competitions'],
@@ -30,11 +32,12 @@ export default function LeaderboardPage() {
   })
 
   const { data: globalData = [], isLoading: globalLoading } = useQuery({
-    queryKey: ['leaderboard', 'global', '1'],
+    queryKey: ['leaderboard', 'global', seasonId],
     queryFn: async () => {
-      const response = await api.get('/leaderboards/global/1')
+      const response = await api.get(`/leaderboards/global/${seasonId}`)
       return response.data.leaderboard || []
-    }
+    },
+    enabled: seasonId > 0,
   })
 
   return (

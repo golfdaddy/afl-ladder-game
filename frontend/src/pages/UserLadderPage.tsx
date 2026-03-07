@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 interface TeamEntry {
   position: number
@@ -20,18 +21,17 @@ interface UserPrediction {
   ladderUpdatedAt: string | null
 }
 
-const SEASON_ID = 1
-
 export default function UserLadderPage() {
   const { userId } = useParams<{ userId: string }>()
   const navigate = useNavigate()
   const currentUser = useAuthStore((state) => state.user)
+  const { seasonId } = useCurrentSeason()
 
   // Fetch the target user's prediction
   const { data: targetData, isLoading: targetLoading } = useQuery({
-    queryKey: ['prediction', 'user', userId, SEASON_ID],
+    queryKey: ['prediction', 'user', userId, seasonId],
     queryFn: async () => {
-      const res = await api.get(`/predictions/${SEASON_ID}/user/${userId}`)
+      const res = await api.get(`/predictions/${seasonId}/user/${userId}`)
       return res.data.prediction as UserPrediction
     },
     enabled: !!userId,
@@ -39,9 +39,9 @@ export default function UserLadderPage() {
 
   // Fetch the logged-in user's own prediction (for comparison)
   const { data: myData, isLoading: myLoading } = useQuery({
-    queryKey: ['prediction', SEASON_ID],
+    queryKey: ['prediction', seasonId],
     queryFn: async () => {
-      const res = await api.get(`/predictions/${SEASON_ID}`)
+      const res = await api.get(`/predictions/${seasonId}`)
       return res.data.prediction as UserPrediction
     },
   })

@@ -9,11 +9,16 @@ export interface Season {
 }
 
 export class SeasonModel {
+  /**
+   * Returns the most recent active season (open or locked).
+   * 'locked' means predictions are closed but the season is still in progress.
+   * 'completed' seasons are excluded — use getAllSeasons for historical data.
+   */
   static async getCurrentSeason(): Promise<Season | null> {
     const result = await db.query(
       `SELECT id, year, start_date as "startDate", cutoff_date as "cutoffDate", status
        FROM seasons
-       WHERE status = 'open'
+       WHERE status IN ('open', 'locked')
        ORDER BY year DESC
        LIMIT 1`
     )

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
 import { COMPETITION_LOCKED } from '../config'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 interface LeaderboardEntry {
   userId: number
@@ -75,6 +76,7 @@ export default function CompetitionPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
+  const { seasonId } = useCurrentSeason()
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [inviteError, setInviteError] = useState('')
@@ -110,12 +112,12 @@ export default function CompetitionPage() {
 
   // Fetch current AFL ladder for side-by-side comparison
   const { data: aflLadderData } = useQuery({
-    queryKey: ['afl-ladder', '1'],
+    queryKey: ['afl-ladder', seasonId],
     queryFn: async () => {
-      const response = await api.get('/admin/afl-ladder/1')
+      const response = await api.get(`/admin/afl-ladder/${seasonId}`)
       return response.data
     },
-    enabled: COMPETITION_LOCKED,
+    enabled: COMPETITION_LOCKED && seasonId > 0,
     retry: false,
   })
 
@@ -416,7 +418,7 @@ export default function CompetitionPage() {
                   {COMPETITION_LOCKED ? 'Competition is locked — view only' : `Last updated: ${formatDate(me.predictionUpdatedAt)}`}
                 </p>
                 <button
-                  onClick={() => navigate('/prediction/1')}
+                  onClick={() => navigate(`/prediction/${seasonId}`)}
                   className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors"
                 >
                   {COMPETITION_LOCKED ? '👁 View My Ladder' : 'View / Edit Prediction'}
@@ -442,7 +444,7 @@ export default function CompetitionPage() {
                   Submit before the March 10 cutoff!
                 </p>
                 <button
-                  onClick={() => navigate('/prediction/1')}
+                  onClick={() => navigate(`/prediction/${seasonId}`)}
                   className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm transition-colors"
                 >
                   Submit My Prediction
