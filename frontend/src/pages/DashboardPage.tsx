@@ -949,7 +949,13 @@ export default function DashboardPage() {
                             {/* Ladder rows */}
                             {mp.ladder.map((team, i) => {
                               const pos = i + 1
-                              const matchesAFL = aflTeams.length > 0 && aflTeams[i] === team
+                              const aflIdx = aflTeams.length > 0 ? aflTeams.indexOf(team) : -1
+                              const aflActualPos = aflIdx >= 0 ? aflIdx + 1 : null
+                              const diff = aflActualPos !== null ? pos - aflActualPos : null
+                              // diff > 0 → team doing better than predicted (up ↑)
+                              // diff < 0 → team doing worse than predicted (down ↓)
+                              // diff = 0 → perfect match ✓
+                              const matchesAFL = diff === 0
                               const zoneClass =
                                 pos <= 4  ? 'bg-emerald-50/60' :
                                 pos <= 8  ? 'bg-blue-50/40' :
@@ -958,15 +964,29 @@ export default function DashboardPage() {
                               return (
                                 <div
                                   key={i}
-                                  className={`h-9 flex items-center px-3 border-b border-slate-50 ${matchesAFL ? 'bg-emerald-100' : zoneClass}`}
+                                  className={`h-9 flex items-center px-2 border-b border-slate-50 ${matchesAFL ? 'bg-emerald-100' : zoneClass}`}
                                 >
-                                  <span className={`text-xs font-semibold truncate flex-1 ${matchesAFL ? 'text-emerald-700 font-bold' : 'text-slate-700'}`}>
+                                  <span className={`text-xs font-semibold truncate flex-1 min-w-0 ${matchesAFL ? 'text-emerald-700 font-bold' : 'text-slate-700'}`}>
                                     {team}
                                   </span>
-                                  {matchesAFL && (
+                                  {diff === null ? null : diff === 0 ? (
                                     <svg className="w-3 h-3 text-emerald-500 flex-shrink-0 ml-1" fill="currentColor" viewBox="0 0 20 20">
                                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                     </svg>
+                                  ) : diff > 0 ? (
+                                    <span className="flex-shrink-0 ml-1 flex items-center gap-px text-emerald-600">
+                                      <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
+                                      </svg>
+                                      <span className="text-[9px] font-black leading-none">{diff}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="flex-shrink-0 ml-1 flex items-center gap-px text-red-500">
+                                      <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                      </svg>
+                                      <span className="text-[9px] font-black leading-none">{Math.abs(diff)}</span>
+                                    </span>
                                   )}
                                 </div>
                               )
