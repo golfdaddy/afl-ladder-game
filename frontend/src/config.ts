@@ -6,8 +6,8 @@ const _now = new Date()
 const _seasonEnd = new Date(GRAND_FINAL.getTime() + 14 * 24 * 60 * 60 * 1000)
 
 // COMPETITION_LOCKED: true from cutoff through the end of season window.
-// Manually set to true for early lockout; will auto-derive from CUTOFF after Mar 10.
-export const COMPETITION_LOCKED = true
+// Auto-derived: true once the cutoff date has passed.
+export const COMPETITION_LOCKED = _now >= CUTOFF
 
 // SEASON_OVER: 2 weeks after the grand final — join/create leagues re-appear for next season.
 export const SEASON_OVER = _now >= _seasonEnd

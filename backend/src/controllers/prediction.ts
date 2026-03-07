@@ -1,32 +1,19 @@
 import { Response } from 'express'
+import { ZodError } from 'zod'
 import { AuthRequest } from '../middleware/auth'
 import { PredictionModel, PredictedTeam } from '../models/prediction'
 import { SeasonModel } from '../models/season'
 import { AFLLadderModel } from '../models/aflLadder'
 import { db } from '../db'
+import { submitPredictionSchema, updatePredictionSchema } from '../schemas/prediction'
+import { zodError } from '../utils/zodError'
 
 export class PredictionController {
   static async submit(req: AuthRequest, res: Response) {
     try {
       if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
 
-      const { seasonId, teams } = req.body
-
-      if (!seasonId || !Array.isArray(teams) || teams.length !== 18) {
-        return res.status(400).json({ error: 'Invalid prediction data. Must have 18 teams.' })
-      }
-
-      const isValid = teams.every(
-        (t: any) =>
-          typeof t.position === 'number' &&
-          t.position >= 1 &&
-          t.position <= 18 &&
-          typeof t.teamName === 'string'
-      )
-
-      if (!isValid) {
-        return res.status(400).json({ error: 'Invalid team positions or names' })
-      }
+      const { seasonId, teams } = submitPredictionSchema.parse(req.body)
 
       const isAfterCutoff = await SeasonModel.isAfterCutoff(seasonId)
       if (isAfterCutoff) {
@@ -42,6 +29,7 @@ export class PredictionController {
       const prediction = await PredictionModel.create(req.userId, seasonId, teams)
       res.status(201).json({ prediction })
     } catch (error) {
+      if (error instanceof ZodError) return zodError(res, error)
       console.error('Prediction submission error:', error)
       res.status(500).json({ error: 'Failed to submit prediction' })
     }
@@ -204,11 +192,7 @@ export class PredictionController {
       if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
 
       const { id } = req.params
-      const { teams } = req.body
-
-      if (!Array.isArray(teams) || teams.length !== 18) {
-        return res.status(400).json({ error: 'Invalid prediction data. Must have 18 teams.' })
-      }
+      const { teams } = updatePredictionSchema.parse(req.body)
 
       const prediction = await PredictionModel.findById(parseInt(id))
       if (!prediction) return res.status(404).json({ error: 'Prediction not found' })
@@ -225,6 +209,7 @@ export class PredictionController {
       const updated = await PredictionModel.update(parseInt(id), teams)
       res.json({ prediction: updated })
     } catch (error) {
+      if (error instanceof ZodError) return zodError(res, error)
       console.error('Prediction update error:', error)
       res.status(500).json({ error: 'Failed to update prediction' })
     }

@@ -1,9 +1,12 @@
 import { Response } from 'express'
+import { ZodError } from 'zod'
 import { AuthRequest } from '../middleware/auth'
 import { CompetitionModel } from '../models/competition'
 import { CompetitionInviteModel } from '../models/competitionInvite'
 import { SeasonModel } from '../models/season'
 import { db } from '../db'
+import { createCompetitionSchema, joinCompetitionSchema } from '../schemas/competition'
+import { zodError } from '../utils/zodError'
 
 export class CompetitionController {
   static async create(req: AuthRequest, res: Response) {
@@ -12,24 +15,20 @@ export class CompetitionController {
         return res.status(401).json({ error: 'Unauthorized' })
       }
 
-      const { seasonId, name, description, isPublic } = req.body
-
-      if (!seasonId || !name) {
-        return res.status(400).json({ error: 'Season ID and name are required' })
-      }
+      const data = createCompetitionSchema.parse(req.body)
 
       // Verify season exists
-      const season = await SeasonModel.getSeasonById(seasonId)
+      const season = await SeasonModel.getSeasonById(data.seasonId)
       if (!season) {
         return res.status(400).json({ error: 'Invalid season' })
       }
 
       const competition = await CompetitionModel.create(
         req.userId,
-        seasonId,
-        name,
-        description || null,
-        isPublic || false
+        data.seasonId,
+        data.name,
+        data.description ?? null,
+        data.isPublic
       )
 
       // Add creator as league_admin
@@ -37,6 +36,7 @@ export class CompetitionController {
 
       res.status(201).json({ competition })
     } catch (error) {
+      if (error instanceof ZodError) return zodError(res, error)
       console.error('Competition creation error:', error)
       res.status(500).json({ error: 'Failed to create competition' })
     }
@@ -111,11 +111,8 @@ export class CompetitionController {
         return res.status(401).json({ error: 'Unauthorized' })
       }
 
-      const { joinCode } = req.body
-
-      if (!joinCode) {
-        return res.status(400).json({ error: 'Join code is required' })
-      }
+      const data = joinCompetitionSchema.parse(req.body)
+      const { joinCode } = data
 
       const competition = await CompetitionModel.findByJoinCode(joinCode)
       if (!competition) {
@@ -144,6 +141,7 @@ export class CompetitionController {
 
       res.json({ competition, message: 'Successfully joined competition' })
     } catch (error) {
+      if (error instanceof ZodError) return zodError(res, error)
       console.error('Competition join error:', error)
       res.status(500).json({ error: 'Failed to join competition' })
     }
