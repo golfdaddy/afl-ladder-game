@@ -929,12 +929,12 @@ export default function DashboardPage() {
 
                   {/* ── RIGHT: scrollable user columns ── */}
                   <div className="overflow-x-auto flex-1">
-                    <div className="flex">
+                    <div className="flex min-w-full">
                       {spotlightPredictions.map((mp) => {
                         const entry = (spotlightLeaderboard as LeaderboardEntry[]).find((l) => l.userId === mp.userId)
                         const isMe = mp.userId === user?.id
                         return (
-                          <div key={mp.userId} className="flex-shrink-0 w-36 border-l border-slate-100">
+                          <div key={mp.userId} className="flex-[1_0_9rem] border-l border-slate-100">
                             {/* Column header */}
                             <div className={`h-14 flex flex-col justify-end px-3 pb-3 border-b border-slate-100 ${isMe ? 'bg-emerald-50' : 'bg-slate-50'}`}>
                               <button
