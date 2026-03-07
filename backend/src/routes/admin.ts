@@ -20,6 +20,12 @@ router.post('/sync-ladder', adminAuth, asyncHandler(AdminController.syncFromSqui
 router.get('/users', authMiddleware, requireAdmin, asyncHandler(AdminController.listUsers))
 router.put('/users/:id/role', authMiddleware, requireAdmin, asyncHandler(AdminController.setUserRole))
 router.put('/seasons/:seasonId/cutoff', authMiddleware, requireAdmin, asyncHandler(AdminController.setSeasonCutoff))
+router.get('/email/templates', authMiddleware, requireAdmin, asyncHandler(AdminController.listEmailTemplates))
+router.post('/email/templates', authMiddleware, requireAdmin, asyncHandler(AdminController.createEmailTemplate))
+router.put('/email/templates/:id', authMiddleware, requireAdmin, asyncHandler(AdminController.updateEmailTemplate))
+router.delete('/email/templates/:id', authMiddleware, requireAdmin, asyncHandler(AdminController.deleteEmailTemplate))
+router.post('/email/templates/preview', authMiddleware, requireAdmin, asyncHandler(AdminController.previewEmailTemplate))
+router.post('/email/templates/:id/send', authMiddleware, requireAdmin, asyncHandler(AdminController.sendEmailTemplate))
 
 // Users + groups combined (for admin UI)
 router.get('/users-with-groups', authMiddleware, requireAdmin, asyncHandler(AdminController.listUsersWithGroups))
