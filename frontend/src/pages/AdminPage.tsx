@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
+import { FEATURE_FANTASY7_ENABLED } from '../config'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
 
@@ -22,6 +24,21 @@ interface EmailGroup {
   description: string | null
 }
 
+const MONTHS = [
+  { value: 1, label: 'Jan' },
+  { value: 2, label: 'Feb' },
+  { value: 3, label: 'Mar' },
+  { value: 4, label: 'Apr' },
+  { value: 5, label: 'May' },
+  { value: 6, label: 'Jun' },
+  { value: 7, label: 'Jul' },
+  { value: 8, label: 'Aug' },
+  { value: 9, label: 'Sep' },
+  { value: 10, label: 'Oct' },
+  { value: 11, label: 'Nov' },
+  { value: 12, label: 'Dec' },
+]
+
 function fetchWithAuth(url: string, token: string, opts?: RequestInit) {
   return fetch(url, {
     ...opts,
@@ -37,9 +54,23 @@ export default function AdminPage() {
   const navigate = useNavigate()
   const { user, token, isAdmin } = useAuthStore()
   const queryClient = useQueryClient()
+  const { seasonId, seasonYear, cutoffAt } = useCurrentSeason()
   const [syncStatus, setSyncStatus] = useState<string | null>(null)
   const [syncLoading, setSyncLoading] = useState(false)
   const [exportLoading, setExportLoading] = useState(false)
+  const [fantasyRoundId, setFantasyRoundId] = useState('1')
+  const [fantasyLoading, setFantasyLoading] = useState(false)
+  const [fantasyStatus, setFantasyStatus] = useState<string | null>(null)
+  const [cutoffDay, setCutoffDay] = useState<string>('1')
+  const [cutoffMonth, setCutoffMonth] = useState<string>('1')
+  const [cutoffYear, setCutoffYear] = useState<string>(String(seasonYear))
+  const [cutoffStatus, setCutoffStatus] = useState<string | null>(null)
+
+  useEffect(() => {
+    setCutoffDay(String(cutoffAt.getDate()))
+    setCutoffMonth(String(cutoffAt.getMonth() + 1))
+    setCutoffYear(String(cutoffAt.getFullYear()))
+  }, [cutoffAt.getTime()])
 
   // Redirect if not admin
   if (!isAdmin) {
@@ -74,6 +105,21 @@ export default function AdminPage() {
     enabled: !!token && isAdmin,
   })
 
+  const { data: fantasyHealth } = useQuery({
+    queryKey: ['admin-fantasy-health'],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`${API_BASE}/admin/fantasy/health`, token!)
+      if (!res.ok) throw new Error('Failed to fetch fantasy health')
+      return res.json() as Promise<{
+        featureEnabled: boolean
+        provider: { provider: string; ok: boolean; details?: string }
+        counts: { rounds: number; players: number; competitions: number }
+      }>
+    },
+    enabled: !!token && isAdmin && FEATURE_FANTASY7_ENABLED,
+    retry: false,
+  })
+
   const setRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: number; role: 'user' | 'admin' }) => {
       const res = await fetchWithAuth(`${API_BASE}/admin/users/${userId}/role`, token!, {
@@ -104,13 +150,63 @@ export default function AdminPage() {
     },
   })
 
+  const updateCutoffMutation = useMutation({
+    mutationFn: async (nextCutoffDate: string) => {
+      const res = await fetchWithAuth(`${API_BASE}/admin/seasons/${seasonId}/cutoff`, token!, {
+        method: 'PUT',
+        body: JSON.stringify({ cutoffDate: nextCutoffDate }),
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error || 'Failed to update cutoff date')
+      return body
+    },
+    onSuccess: async (body) => {
+      const updated = body?.season?.cutoffDate ? new Date(body.season.cutoffDate) : null
+      const formatted = updated
+        ? updated.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+        : body?.season?.cutoffDate
+      setCutoffStatus(`✅ Lockout date updated${formatted ? ` to ${formatted}` : ''}`)
+      await queryClient.invalidateQueries({ queryKey: ['current-season'] })
+    },
+    onError: (err: any) => {
+      setCutoffStatus(`❌ ${err.message}`)
+    },
+  })
+
+  const toIsoDate = (year: number, month: number, day: number) => {
+    const yyyy = String(year)
+    const mm = String(month).padStart(2, '0')
+    const dd = String(day).padStart(2, '0')
+    return `${yyyy}-${mm}-${dd}`
+  }
+
+  function handleUpdateCutoffDate() {
+    const year = Number(cutoffYear)
+    const month = Number(cutoffMonth)
+    const day = Number(cutoffDay)
+
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+      setCutoffStatus('❌ Please select a valid day, month, and year')
+      return
+    }
+
+    const daysInMonth = new Date(year, month, 0).getDate()
+    if (month < 1 || month > 12 || day < 1 || day > daysInMonth) {
+      setCutoffStatus('❌ Please select a valid calendar date')
+      return
+    }
+
+    setCutoffStatus(null)
+    updateCutoffMutation.mutate(toIsoDate(year, month, day))
+  }
+
   async function handleSyncLadder() {
     setSyncLoading(true)
     setSyncStatus(null)
     try {
       const res = await fetchWithAuth(`${API_BASE}/admin/sync-ladder`, token!, {
         method: 'POST',
-        body: JSON.stringify({ seasonId: 1 }),
+        body: JSON.stringify({ seasonId }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Sync failed')
@@ -125,13 +221,13 @@ export default function AdminPage() {
   async function handleExportPredictions() {
     setExportLoading(true)
     try {
-      const res = await fetchWithAuth(`${API_BASE}/admin/export/predictions?format=csv&seasonId=1`, token!)
+      const res = await fetchWithAuth(`${API_BASE}/admin/export/predictions?format=csv&seasonId=${seasonId}`, token!)
       if (!res.ok) throw new Error('Export failed')
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `predictions-season1-${new Date().toISOString().slice(0, 10)}.csv`
+      a.download = `predictions-season${seasonId}-${new Date().toISOString().slice(0, 10)}.csv`
       a.click()
       URL.revokeObjectURL(url)
     } catch (err: any) {
@@ -141,11 +237,41 @@ export default function AdminPage() {
     }
   }
 
+  async function runFantasyAction(action: 'sync' | 'price' | 'scores' | 'recompute') {
+    const parsedRoundId = Number(fantasyRoundId)
+    if (!Number.isFinite(parsedRoundId) || parsedRoundId <= 0) {
+      setFantasyStatus('❌ Enter a valid round ID')
+      return
+    }
+
+    setFantasyLoading(true)
+    setFantasyStatus(null)
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/admin/fantasy/${action}/round/${parsedRoundId}`, token!, {
+        method: 'POST',
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error || `Fantasy ${action} failed`)
+      setFantasyStatus(`✅ ${body.message || `Fantasy ${action} completed`}`)
+      queryClient.invalidateQueries({ queryKey: ['admin-fantasy-health'] })
+    } catch (err: any) {
+      setFantasyStatus(`❌ ${err.message}`)
+    } finally {
+      setFantasyLoading(false)
+    }
+  }
+
   const users       = data?.users       || []
   const groups      = data?.groups      || []
   const memberships = data?.memberships || {}
   const adminCount  = users.filter((u) => u.role === 'admin').length
   const userCount   = users.filter((u) => u.role === 'user').length
+  const selectedYear = Number(cutoffYear)
+  const selectedMonth = Number(cutoffMonth)
+  const dayCount = Number.isInteger(selectedYear) && Number.isInteger(selectedMonth)
+    ? new Date(selectedYear, selectedMonth, 0).getDate()
+    : 31
+  const dayOptions = Array.from({ length: dayCount }, (_, i) => i + 1)
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -211,7 +337,7 @@ export default function AdminPage() {
                   Syncing…
                 </>
               ) : (
-                '🔄 Sync Ladder from Squiggle'
+                `🔄 Sync Ladder from Squiggle (${seasonYear})`
               )}
             </button>
             <button
@@ -228,10 +354,113 @@ export default function AdminPage() {
                   Exporting…
                 </>
               ) : (
-                '📥 Export All Submissions (CSV)'
+                `📥 Export All Submissions (${seasonYear})`
               )}
             </button>
           </div>
+          <div className="mt-5 rounded-xl border border-slate-200 p-4">
+            <h3 className="text-sm font-bold text-slate-700 mb-1">Prediction Lockout Date</h3>
+            <p className="text-xs text-slate-500 mb-3">
+              Current cutoff: {cutoffAt.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={cutoffDay}
+                onChange={(e) => setCutoffDay(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm"
+              >
+                {dayOptions.map((day) => (
+                  <option key={day} value={String(day)}>{day}</option>
+                ))}
+              </select>
+              <select
+                value={cutoffMonth}
+                onChange={(e) => setCutoffMonth(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm"
+              >
+                {MONTHS.map((month) => (
+                  <option key={month.value} value={String(month.value)}>{month.label}</option>
+                ))}
+              </select>
+              <select
+                value={cutoffYear}
+                onChange={(e) => setCutoffYear(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm"
+              >
+                {Array.from({ length: 5 }, (_, i) => seasonYear - 2 + i).map((year) => (
+                  <option key={year} value={String(year)}>{year}</option>
+                ))}
+              </select>
+              <button
+                onClick={handleUpdateCutoffDate}
+                disabled={updateCutoffMutation.isPending}
+                className="px-4 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50"
+              >
+                {updateCutoffMutation.isPending ? 'Saving…' : 'Save Lockout Date'}
+              </button>
+            </div>
+            {cutoffStatus && (
+              <p className={`mt-2 text-sm font-medium ${cutoffStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
+                {cutoffStatus}
+              </p>
+            )}
+          </div>
+          {FEATURE_FANTASY7_ENABLED && (
+            <div className="mt-5 rounded-xl border border-slate-200 p-4">
+              <h3 className="text-sm font-bold text-slate-700 mb-3">Fantasy 7 Operations</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  value={fantasyRoundId}
+                  onChange={(e) => setFantasyRoundId(e.target.value)}
+                  className="w-28 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm"
+                  placeholder="Round ID"
+                />
+                <button
+                  onClick={() => runFantasyAction('sync')}
+                  disabled={fantasyLoading}
+                  className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  Sync
+                </button>
+                <button
+                  onClick={() => runFantasyAction('price')}
+                  disabled={fantasyLoading}
+                  className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  Price
+                </button>
+                <button
+                  onClick={() => runFantasyAction('scores')}
+                  disabled={fantasyLoading}
+                  className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  Scores
+                </button>
+                <button
+                  onClick={() => runFantasyAction('recompute')}
+                  disabled={fantasyLoading}
+                  className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  Recompute
+                </button>
+              </div>
+              {fantasyHealth && (
+                <p className="mt-3 text-xs text-slate-500">
+                  Provider: <span className="font-semibold text-slate-700">{fantasyHealth.provider.provider}</span>
+                  {' • '}Rounds: {fantasyHealth.counts.rounds}
+                  {' • '}Players: {fantasyHealth.counts.players}
+                  {' • '}Competitions: {fantasyHealth.counts.competitions}
+                </p>
+              )}
+              {fantasyStatus && (
+                <p className={`mt-2 text-sm font-medium ${fantasyStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {fantasyStatus}
+                </p>
+              )}
+            </div>
+          )}
           {syncStatus && (
             <p className={`mt-3 text-sm font-medium ${syncStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
               {syncStatus}
