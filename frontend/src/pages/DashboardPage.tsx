@@ -608,47 +608,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Season score summary — only shown when at least one competition has scoring */}
-        {(() => {
-          const scored = (competitions as Competition[]).filter(c => c.userScore !== null)
-          if (scored.length === 0) return null
-          const bestScore = Math.min(...scored.map(c => c.userScore!))
-          const bestRank  = Math.min(...scored.filter(c => c.userRank !== null).map(c => c.userRank!))
-          const bestComp  = scored.find(c => c.userScore === bestScore)
-          return (
-            <div className="mb-6 bg-slate-900 rounded-2xl px-5 py-5 flex flex-wrap gap-5 items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest">{seasonYear} Season</p>
-                <p className="text-slate-300 text-sm mt-0.5">
-                  Your best score is in <span className="text-white font-bold">{bestComp?.name}</span>
-                </p>
-              </div>
-              <div className="flex gap-6">
-                <div className="text-center">
-                  <p className="text-3xl font-black text-emerald-400">{bestScore}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">best pts</p>
-                </div>
-                {bestRank && bestRank !== Infinity && (
-                  <div className="text-center">
-                    <p className="text-3xl font-black text-amber-400">#{bestRank}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">best rank</p>
-                  </div>
-                )}
-                <div className="text-center">
-                  <p className="text-3xl font-black text-white">{scored.length}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">competing</p>
-                </div>
-              </div>
-              <button
-                onClick={() => navigate(`/prediction/${seasonId}`)}
-                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm transition-colors flex-shrink-0"
-              >
-                View Scores
-              </button>
-            </div>
-          )
-        })()}
-
         {/* Competitions List */}
         <div>
           <button
