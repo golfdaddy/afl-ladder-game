@@ -50,4 +50,15 @@ export class SeasonModel {
     )
     return result.rows
   }
+
+  static async updateCutoffDate(seasonId: number, cutoffDate: string): Promise<Season | null> {
+    const result = await db.query(
+      `UPDATE seasons
+       SET cutoff_date = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, year, start_date as "startDate", cutoff_date as "cutoffDate", status`,
+      [cutoffDate, seasonId]
+    )
+    return result.rows[0] || null
+  }
 }

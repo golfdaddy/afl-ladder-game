@@ -3,7 +3,7 @@ import { useAuthStore } from '../store/auth'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
-import { COMPETITION_LOCKED, SEASON_OVER, CUTOFF, FEATURE_FANTASY7_ENABLED } from '../config'
+import { SEASON_OVER, FEATURE_FANTASY7_ENABLED } from '../config'
 import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 function useCountdown(target: Date) {
@@ -67,8 +67,8 @@ export default function DashboardPage() {
   const logout = useAuthStore((state) => state.logout)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const countdown = useCountdown(CUTOFF)
-  const { seasonId } = useCurrentSeason()
+  const { seasonId, seasonYear, cutoffAt, isLocked: competitionLocked } = useCurrentSeason()
+  const countdown = useCountdown(cutoffAt)
 
   const [activePanel, setActivePanel] = useState<'none' | 'create' | 'join'>('none')
   const [formData, setFormData] = useState({ name: '', description: '', isPublic: false })
@@ -77,7 +77,11 @@ export default function DashboardPage() {
   const [joinError, setJoinError] = useState('')
   const [copiedId, setCopiedId] = useState<number | null>(null)
   // Collapse competitions list by default when locked (spotlight section is the main view)
-  const [showComps, setShowComps] = useState(!COMPETITION_LOCKED)
+  const [showComps, setShowComps] = useState(!competitionLocked)
+
+  useEffect(() => {
+    if (competitionLocked) setShowComps(false)
+  }, [competitionLocked])
 
   // Fetch user's competitions
   const { data: competitions = [], isLoading } = useQuery({
@@ -107,7 +111,7 @@ export default function DashboardPage() {
       const response = await api.get(`/leaderboards/competition/${firstComp.id}`)
       return (response.data.leaderboard || []) as LeaderboardEntry[]
     },
-    enabled: COMPETITION_LOCKED && !!firstComp,
+    enabled: competitionLocked && !!firstComp,
   })
 
   // Member predictions for first competition (only when locked)
@@ -117,7 +121,7 @@ export default function DashboardPage() {
       const response = await api.get(`/competitions/${firstComp.id}/predictions`)
       return (response.data.predictions || []) as MemberPrediction[]
     },
-    enabled: COMPETITION_LOCKED && !!firstComp,
+    enabled: competitionLocked && !!firstComp,
   })
 
   // Fetch current AFL ladder for side-by-side comparison
@@ -127,7 +131,7 @@ export default function DashboardPage() {
       const response = await api.get(`/admin/afl-ladder/${seasonId}`)
       return response.data
     },
-    enabled: COMPETITION_LOCKED && seasonId > 0,
+    enabled: competitionLocked && seasonId > 0,
     retry: false,
   })
 
@@ -331,7 +335,7 @@ export default function DashboardPage() {
         )}
 
         {/* ── Locked Banner or Cutoff Countdown ── */}
-        {COMPETITION_LOCKED ? (
+        {competitionLocked ? (
           <div className="mb-6 rounded-2xl px-5 py-4 flex flex-wrap items-center justify-between gap-4 bg-slate-900 border border-slate-700">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-red-600">
@@ -342,7 +346,7 @@ export default function DashboardPage() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-red-400">🔒 Competition locked</p>
                 <p className="text-slate-300 text-sm font-medium">
-                  The 2026 AFL season is underway — good luck!
+                  The {seasonYear} AFL season is underway — good luck!
                 </p>
               </div>
             </div>
@@ -416,7 +420,7 @@ export default function DashboardPage() {
 
         {/* Quick Actions — Create/Join hidden during active season, re-appear after season ends */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-8">
-          {(!COMPETITION_LOCKED || SEASON_OVER) && (
+          {(!competitionLocked || SEASON_OVER) && (
             <button
               onClick={() => togglePanel('create')}
               className={`flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all ${
@@ -435,7 +439,7 @@ export default function DashboardPage() {
             </button>
           )}
 
-          {(!COMPETITION_LOCKED || SEASON_OVER) && (
+          {(!competitionLocked || SEASON_OVER) && (
             <button
               onClick={() => togglePanel('join')}
               className={`flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all ${
@@ -463,8 +467,8 @@ export default function DashboardPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
               </svg>
             </div>
-            <span className="font-bold text-slate-900 text-sm">{COMPETITION_LOCKED ? 'My Ladder' : 'Predict'}</span>
-            <span className="text-xs text-slate-400 mt-0.5">{COMPETITION_LOCKED ? 'View submission' : 'Your 2026 ladder'}</span>
+            <span className="font-bold text-slate-900 text-sm">{competitionLocked ? 'My Ladder' : 'Predict'}</span>
+            <span className="text-xs text-slate-400 mt-0.5">{competitionLocked ? 'View submission' : `Your ${seasonYear} ladder`}</span>
           </button>
 
           <button
@@ -614,7 +618,7 @@ export default function DashboardPage() {
           return (
             <div className="mb-6 bg-slate-900 rounded-2xl px-5 py-5 flex flex-wrap gap-5 items-center justify-between">
               <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest">2026 Season</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest">{seasonYear} Season</p>
                 <p className="text-slate-300 text-sm mt-0.5">
                   Your best score is in <span className="text-white font-bold">{bestComp?.name}</span>
                 </p>
@@ -755,7 +759,7 @@ export default function DashboardPage() {
 
                   {/* Actions */}
                   <div className="px-5 pb-5 flex gap-2">
-                    {!COMPETITION_LOCKED && !comp.userHasSubmitted && (
+                    {!competitionLocked && !comp.userHasSubmitted && (
                       <button
                         onClick={(e) => { e.stopPropagation(); navigate(`/prediction/${seasonId}`) }}
                         className="flex-1 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-colors"
@@ -763,7 +767,7 @@ export default function DashboardPage() {
                         Submit Prediction
                       </button>
                     )}
-                    {!COMPETITION_LOCKED && comp.userHasSubmitted && (
+                    {!competitionLocked && comp.userHasSubmitted && (
                       <button
                         onClick={(e) => handleCopyCode(comp, e)}
                         className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
@@ -803,7 +807,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Competition Spotlight (locked: show leaderboard + ladders for first comp) ── */}
-        {COMPETITION_LOCKED && firstComp && (
+        {competitionLocked && firstComp && (
           <div className="mt-8 space-y-6">
             <div className="flex items-center gap-3">
               <h2 className="text-sm font-bold text-slate-700 uppercase tracking-widest">

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
@@ -24,6 +24,21 @@ interface EmailGroup {
   description: string | null
 }
 
+const MONTHS = [
+  { value: 1, label: 'Jan' },
+  { value: 2, label: 'Feb' },
+  { value: 3, label: 'Mar' },
+  { value: 4, label: 'Apr' },
+  { value: 5, label: 'May' },
+  { value: 6, label: 'Jun' },
+  { value: 7, label: 'Jul' },
+  { value: 8, label: 'Aug' },
+  { value: 9, label: 'Sep' },
+  { value: 10, label: 'Oct' },
+  { value: 11, label: 'Nov' },
+  { value: 12, label: 'Dec' },
+]
+
 function fetchWithAuth(url: string, token: string, opts?: RequestInit) {
   return fetch(url, {
     ...opts,
@@ -39,13 +54,23 @@ export default function AdminPage() {
   const navigate = useNavigate()
   const { user, token, isAdmin } = useAuthStore()
   const queryClient = useQueryClient()
-  const { seasonId } = useCurrentSeason()
+  const { seasonId, seasonYear, cutoffAt } = useCurrentSeason()
   const [syncStatus, setSyncStatus] = useState<string | null>(null)
   const [syncLoading, setSyncLoading] = useState(false)
   const [exportLoading, setExportLoading] = useState(false)
   const [fantasyRoundId, setFantasyRoundId] = useState('1')
   const [fantasyLoading, setFantasyLoading] = useState(false)
   const [fantasyStatus, setFantasyStatus] = useState<string | null>(null)
+  const [cutoffDay, setCutoffDay] = useState<string>('1')
+  const [cutoffMonth, setCutoffMonth] = useState<string>('1')
+  const [cutoffYear, setCutoffYear] = useState<string>(String(seasonYear))
+  const [cutoffStatus, setCutoffStatus] = useState<string | null>(null)
+
+  useEffect(() => {
+    setCutoffDay(String(cutoffAt.getDate()))
+    setCutoffMonth(String(cutoffAt.getMonth() + 1))
+    setCutoffYear(String(cutoffAt.getFullYear()))
+  }, [cutoffAt.getTime()])
 
   // Redirect if not admin
   if (!isAdmin) {
@@ -125,6 +150,56 @@ export default function AdminPage() {
     },
   })
 
+  const updateCutoffMutation = useMutation({
+    mutationFn: async (nextCutoffDate: string) => {
+      const res = await fetchWithAuth(`${API_BASE}/admin/seasons/${seasonId}/cutoff`, token!, {
+        method: 'PUT',
+        body: JSON.stringify({ cutoffDate: nextCutoffDate }),
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error || 'Failed to update cutoff date')
+      return body
+    },
+    onSuccess: async (body) => {
+      const updated = body?.season?.cutoffDate ? new Date(body.season.cutoffDate) : null
+      const formatted = updated
+        ? updated.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+        : body?.season?.cutoffDate
+      setCutoffStatus(`✅ Lockout date updated${formatted ? ` to ${formatted}` : ''}`)
+      await queryClient.invalidateQueries({ queryKey: ['current-season'] })
+    },
+    onError: (err: any) => {
+      setCutoffStatus(`❌ ${err.message}`)
+    },
+  })
+
+  const toIsoDate = (year: number, month: number, day: number) => {
+    const yyyy = String(year)
+    const mm = String(month).padStart(2, '0')
+    const dd = String(day).padStart(2, '0')
+    return `${yyyy}-${mm}-${dd}`
+  }
+
+  function handleUpdateCutoffDate() {
+    const year = Number(cutoffYear)
+    const month = Number(cutoffMonth)
+    const day = Number(cutoffDay)
+
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+      setCutoffStatus('❌ Please select a valid day, month, and year')
+      return
+    }
+
+    const daysInMonth = new Date(year, month, 0).getDate()
+    if (month < 1 || month > 12 || day < 1 || day > daysInMonth) {
+      setCutoffStatus('❌ Please select a valid calendar date')
+      return
+    }
+
+    setCutoffStatus(null)
+    updateCutoffMutation.mutate(toIsoDate(year, month, day))
+  }
+
   async function handleSyncLadder() {
     setSyncLoading(true)
     setSyncStatus(null)
@@ -191,6 +266,12 @@ export default function AdminPage() {
   const memberships = data?.memberships || {}
   const adminCount  = users.filter((u) => u.role === 'admin').length
   const userCount   = users.filter((u) => u.role === 'user').length
+  const selectedYear = Number(cutoffYear)
+  const selectedMonth = Number(cutoffMonth)
+  const dayCount = Number.isInteger(selectedYear) && Number.isInteger(selectedMonth)
+    ? new Date(selectedYear, selectedMonth, 0).getDate()
+    : 31
+  const dayOptions = Array.from({ length: dayCount }, (_, i) => i + 1)
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -256,7 +337,7 @@ export default function AdminPage() {
                   Syncing…
                 </>
               ) : (
-                '🔄 Sync Ladder from Squiggle'
+                `🔄 Sync Ladder from Squiggle (${seasonYear})`
               )}
             </button>
             <button
@@ -273,9 +354,56 @@ export default function AdminPage() {
                   Exporting…
                 </>
               ) : (
-                '📥 Export All Submissions (CSV)'
+                `📥 Export All Submissions (${seasonYear})`
               )}
             </button>
+          </div>
+          <div className="mt-5 rounded-xl border border-slate-200 p-4">
+            <h3 className="text-sm font-bold text-slate-700 mb-1">Prediction Lockout Date</h3>
+            <p className="text-xs text-slate-500 mb-3">
+              Current cutoff: {cutoffAt.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={cutoffDay}
+                onChange={(e) => setCutoffDay(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm"
+              >
+                {dayOptions.map((day) => (
+                  <option key={day} value={String(day)}>{day}</option>
+                ))}
+              </select>
+              <select
+                value={cutoffMonth}
+                onChange={(e) => setCutoffMonth(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm"
+              >
+                {MONTHS.map((month) => (
+                  <option key={month.value} value={String(month.value)}>{month.label}</option>
+                ))}
+              </select>
+              <select
+                value={cutoffYear}
+                onChange={(e) => setCutoffYear(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm"
+              >
+                {Array.from({ length: 5 }, (_, i) => seasonYear - 2 + i).map((year) => (
+                  <option key={year} value={String(year)}>{year}</option>
+                ))}
+              </select>
+              <button
+                onClick={handleUpdateCutoffDate}
+                disabled={updateCutoffMutation.isPending}
+                className="px-4 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50"
+              >
+                {updateCutoffMutation.isPending ? 'Saving…' : 'Save Lockout Date'}
+              </button>
+            </div>
+            {cutoffStatus && (
+              <p className={`mt-2 text-sm font-medium ${cutoffStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
+                {cutoffStatus}
+              </p>
+            )}
           </div>
           {FEATURE_FANTASY7_ENABLED && (
             <div className="mt-5 rounded-xl border border-slate-200 p-4">

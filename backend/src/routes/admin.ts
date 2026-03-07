@@ -19,6 +19,7 @@ router.post('/sync-ladder', adminAuth, asyncHandler(AdminController.syncFromSqui
 // User management — requires JWT + admin role
 router.get('/users', authMiddleware, requireAdmin, asyncHandler(AdminController.listUsers))
 router.put('/users/:id/role', authMiddleware, requireAdmin, asyncHandler(AdminController.setUserRole))
+router.put('/seasons/:seasonId/cutoff', authMiddleware, requireAdmin, asyncHandler(AdminController.setSeasonCutoff))
 
 // Users + groups combined (for admin UI)
 router.get('/users-with-groups', authMiddleware, requireAdmin, asyncHandler(AdminController.listUsersWithGroups))

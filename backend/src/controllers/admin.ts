@@ -6,6 +6,7 @@ import { SquiggleService } from '../services/squiggle'
 import { EmailGroupModel } from '../models/emailGroup'
 import { UserModel, UserRole } from '../models/user'
 import { db } from '../db'
+import { SeasonModel } from '../models/season'
 
 export class AdminController {
   /** Manual ladder upload (18 teams with full stats) */
@@ -187,6 +188,32 @@ export class AdminController {
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV,
     })
+  }
+
+  /** Admin: update season cutoff date (YYYY-MM-DD) */
+  static async setSeasonCutoff(req: AuthRequest, res: Response) {
+    try {
+      const seasonId = Number(req.params.seasonId)
+      const cutoffDate = String(req.body?.cutoffDate || '')
+
+      if (!Number.isInteger(seasonId) || seasonId <= 0) {
+        return res.status(400).json({ error: 'Invalid seasonId' })
+      }
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoffDate)) {
+        return res.status(400).json({ error: 'cutoffDate must be YYYY-MM-DD' })
+      }
+
+      const updated = await SeasonModel.updateCutoffDate(seasonId, cutoffDate)
+      if (!updated) {
+        return res.status(404).json({ error: 'Season not found' })
+      }
+
+      res.json({ message: 'Season cutoff updated', season: updated })
+    } catch (error) {
+      console.error('Set season cutoff error:', error)
+      res.status(500).json({ error: 'Failed to update season cutoff' })
+    }
   }
 
   // ── Email Groups ──────────────────────────────────────────────────────────

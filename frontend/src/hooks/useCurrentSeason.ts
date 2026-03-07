@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
+import { CUTOFF } from '../config'
 
 interface Season {
   id: number
@@ -33,9 +34,21 @@ export function useCurrentSeason() {
     retry: 1,
   })
 
+  const parsedCutoff = query.data?.cutoffDate ? new Date(query.data.cutoffDate) : CUTOFF
+  const cutoffAt = Number.isNaN(parsedCutoff.getTime()) ? CUTOFF : parsedCutoff
+  const lockOverride = import.meta.env.VITE_COMPETITION_LOCKED
+  const isLocked = lockOverride === 'true'
+    ? true
+    : lockOverride === 'false'
+    ? false
+    : Date.now() >= cutoffAt.getTime()
+
   return {
     ...query,
     /** The current season ID — falls back to 1 while loading or on error */
     seasonId: query.data?.id ?? 1,
+    seasonYear: query.data?.year ?? cutoffAt.getFullYear(),
+    cutoffAt,
+    isLocked,
   }
 }

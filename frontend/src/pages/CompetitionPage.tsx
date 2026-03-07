@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
-import { COMPETITION_LOCKED } from '../config'
 import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 interface LeaderboardEntry {
@@ -76,7 +75,7 @@ export default function CompetitionPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
-  const { seasonId } = useCurrentSeason()
+  const { seasonId, isLocked: competitionLocked } = useCurrentSeason()
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [inviteError, setInviteError] = useState('')
@@ -107,7 +106,7 @@ export default function CompetitionPage() {
       const response = await api.get(`/competitions/${id}/predictions`)
       return response.data.predictions as MemberPrediction[]
     },
-    enabled: COMPETITION_LOCKED,
+    enabled: competitionLocked,
   })
 
   // Fetch current AFL ladder for side-by-side comparison
@@ -117,7 +116,7 @@ export default function CompetitionPage() {
       const response = await api.get(`/admin/afl-ladder/${seasonId}`)
       return response.data
     },
-    enabled: COMPETITION_LOCKED && seasonId > 0,
+    enabled: competitionLocked && seasonId > 0,
     retry: false,
   })
 
@@ -415,16 +414,16 @@ export default function CompetitionPage() {
                   <span className="text-sm font-semibold text-emerald-700">Prediction submitted ✓</span>
                 </div>
                 <p className="text-xs text-slate-400 mb-5">
-                  {COMPETITION_LOCKED ? 'Competition is locked — view only' : `Last updated: ${formatDate(me.predictionUpdatedAt)}`}
+                  {competitionLocked ? 'Competition is locked — view only' : `Last updated: ${formatDate(me.predictionUpdatedAt)}`}
                 </p>
                 <button
                   onClick={() => navigate(`/prediction/${seasonId}`)}
                   className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors"
                 >
-                  {COMPETITION_LOCKED ? '👁 View My Ladder' : 'View / Edit Prediction'}
+                  {competitionLocked ? '👁 View My Ladder' : 'View / Edit Prediction'}
                 </button>
               </div>
-            ) : COMPETITION_LOCKED ? (
+            ) : competitionLocked ? (
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-2.5 h-2.5 bg-red-400 rounded-full" />
@@ -620,7 +619,7 @@ export default function CompetitionPage() {
         </div>
 
         {/* ── Member Ladders (revealed after lockout) ── */}
-        {COMPETITION_LOCKED && (
+        {competitionLocked && (
           <div className="mt-6 bg-white rounded-2xl border border-slate-200 overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-3">
               <div className="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center">
