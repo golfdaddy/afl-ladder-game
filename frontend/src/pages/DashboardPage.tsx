@@ -419,7 +419,7 @@ export default function DashboardPage() {
         ) : null}
 
         {/* Quick Actions — Create/Join hidden during active season, re-appear after season ends */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-8">
+        <div className="grid gap-3 mb-8 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
           {(!competitionLocked || SEASON_OVER) && (
             <button
               onClick={() => togglePanel('create')}
