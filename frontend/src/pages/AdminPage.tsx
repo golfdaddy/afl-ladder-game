@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
@@ -34,6 +34,20 @@ interface EmailTemplate {
   createdAt: string
   updatedAt: string
   tokens: string[]
+}
+
+interface EmailTemplateTokenRef {
+  token: string
+  category: 'profile' | 'season' | 'performance' | 'components'
+  mode: 'escaped' | 'raw'
+  description: string
+}
+
+interface EmailStarterTemplate {
+  name: string
+  description: string
+  subjectTemplate: string
+  htmlTemplate: string
 }
 
 const MONTHS = [
@@ -83,6 +97,7 @@ export default function AdminPage() {
   const [templateSubject, setTemplateSubject] = useState('')
   const [templateHtml, setTemplateHtml] = useState('')
   const [templateStatus, setTemplateStatus] = useState<string | null>(null)
+  const [templateMode, setTemplateMode] = useState<'edit' | 'campaign'>('edit')
   const [previewStatus, setPreviewStatus] = useState<string | null>(null)
   const [previewSubject, setPreviewSubject] = useState('')
   const [previewHtml, setPreviewHtml] = useState('')
@@ -97,6 +112,8 @@ export default function AdminPage() {
   const [campaignDryRun, setCampaignDryRun] = useState(true)
   const [campaignCustomDataJson, setCampaignCustomDataJson] = useState('{}')
   const [campaignStatus, setCampaignStatus] = useState<string | null>(null)
+  const subjectInputRef = useRef<HTMLInputElement | null>(null)
+  const htmlTextareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
     setCutoffDay(String(cutoffAt.getDate()))
@@ -163,6 +180,20 @@ export default function AdminPage() {
       const body = await res.json()
       if (!res.ok) throw new Error(body.error || 'Failed to fetch templates')
       return body as { templates: EmailTemplate[] }
+    },
+    enabled: !!token && isAdmin,
+  })
+
+  const { data: templateReferenceData } = useQuery({
+    queryKey: ['admin-email-template-reference'],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`${API_BASE}/admin/email/template-reference`, token!)
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error || 'Failed to fetch template references')
+      return body as {
+        tokenReference: EmailTemplateTokenRef[]
+        starterTemplates: EmailStarterTemplate[]
+      }
     },
     enabled: !!token && isAdmin,
   })
@@ -277,11 +308,13 @@ export default function AdminPage() {
 
   const previewTemplateMutation = useMutation({
     mutationFn: async (sampleData: Record<string, unknown>) => {
+      const parsedSeasonId = campaignSeasonId ? Number(campaignSeasonId) : null
       const res = await fetchWithAuth(`${API_BASE}/admin/email/templates/preview`, token!, {
         method: 'POST',
         body: JSON.stringify({
           subjectTemplate: templateSubject,
           htmlTemplate: templateHtml,
+          seasonId: parsedSeasonId && Number.isFinite(parsedSeasonId) && parsedSeasonId > 0 ? parsedSeasonId : null,
           sampleData,
         }),
       })
@@ -440,6 +473,45 @@ export default function AdminPage() {
     )
   }
 
+  function insertIntoTextField(
+    currentValue: string,
+    insertText: string,
+    target: HTMLInputElement | HTMLTextAreaElement | null
+  ) {
+    if (!target) return `${currentValue}${insertText}`
+    const start = target.selectionStart ?? currentValue.length
+    const end = target.selectionEnd ?? currentValue.length
+    return `${currentValue.slice(0, start)}${insertText}${currentValue.slice(end)}`
+  }
+
+  function handleInsertToken(token: string, mode: 'escaped' | 'raw', field: 'subject' | 'html') {
+    const wrapped = mode === 'raw' ? `{{{${token}}}}` : `{{${token}}}`
+    if (field === 'subject') {
+      setTemplateSubject((prev) => insertIntoTextField(prev, wrapped, subjectInputRef.current))
+      subjectInputRef.current?.focus()
+      return
+    }
+    setTemplateHtml((prev) => insertIntoTextField(prev, wrapped, htmlTextareaRef.current))
+    htmlTextareaRef.current?.focus()
+  }
+
+  function handleInsertHtmlSnippet(snippet: string) {
+    setTemplateHtml((prev) => insertIntoTextField(prev, snippet, htmlTextareaRef.current))
+    htmlTextareaRef.current?.focus()
+  }
+
+  function applyStarterTemplate(starter: EmailStarterTemplate) {
+    setSelectedTemplateId(null)
+    setTemplateName(starter.name)
+    setTemplateDescription(starter.description)
+    setTemplateSubject(starter.subjectTemplate)
+    setTemplateHtml(starter.htmlTemplate)
+    setTemplateStatus(`✅ Starter "${starter.name}" loaded`)
+    setPreviewStatus(null)
+    setPreviewSubject('')
+    setPreviewHtml('')
+  }
+
   function handleUpdateCutoffDate() {
     const year = Number(cutoffYear)
     const month = Number(cutoffMonth)
@@ -523,6 +595,8 @@ export default function AdminPage() {
 
   const templates = templateData?.templates || []
   const activeTemplate = templates.find((template) => template.id === selectedTemplateId) || null
+  const tokenReference = templateReferenceData?.tokenReference || []
+  const starterTemplates = templateReferenceData?.starterTemplates || []
 
   useEffect(() => {
     if (selectedTemplateId && !activeTemplate) {
@@ -754,289 +828,439 @@ export default function AdminPage() {
             <div>
               <h2 className="text-lg font-bold text-slate-800">✉️ Email Template Builder</h2>
               <p className="text-sm text-slate-500">
-                Personalize with tokens like <code>{'{{displayName}}'}</code>, <code>{'{{seasonYear}}'}</code>, and <code>{'{{roundNo}}'}</code>.
+                Build polished campaign emails with profile tokens and exported site components.
               </p>
             </div>
-            <button
-              onClick={resetTemplateForm}
-              className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50 transition-colors"
-            >
-              + New Template
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setTemplateMode('edit')}
+                className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
+                  templateMode === 'edit'
+                    ? 'bg-slate-900 border-slate-900 text-white'
+                    : 'bg-white border-slate-200 text-slate-600'
+                }`}
+              >
+                Build Template
+              </button>
+              <button
+                onClick={() => setTemplateMode('campaign')}
+                className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
+                  templateMode === 'campaign'
+                    ? 'bg-slate-900 border-slate-900 text-white'
+                    : 'bg-white border-slate-200 text-slate-600'
+                }`}
+              >
+                Send Campaign
+              </button>
+              <button
+                onClick={resetTemplateForm}
+                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50 transition-colors"
+              >
+                + New Template
+              </button>
+            </div>
           </div>
 
           {templatesError && (
             <p className="mt-3 text-sm text-red-500">Failed to load templates.</p>
           )}
 
-          <div className="mt-5 grid gap-4 lg:grid-cols-12">
-            <div className="lg:col-span-4 border border-slate-200 rounded-xl p-3 bg-slate-50">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Template Library</p>
-              {templatesLoading ? (
-                <p className="text-sm text-slate-500">Loading templates…</p>
-              ) : templates.length === 0 ? (
-                <p className="text-sm text-slate-500">No templates yet.</p>
-              ) : (
-                <div className="space-y-2 max-h-72 overflow-auto pr-1">
-                  {templates.map((template) => (
-                    <button
-                      key={template.id}
-                      onClick={() => {
-                        setSelectedTemplateId(template.id)
-                        setTemplateStatus(null)
-                        setPreviewStatus(null)
-                      }}
-                      className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
-                        selectedTemplateId === template.id
-                          ? 'bg-emerald-50 border-emerald-300'
-                          : 'bg-white border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <p className="text-sm font-semibold text-slate-800 truncate">{template.name}</p>
-                      {template.description && (
-                        <p className="text-xs text-slate-500 truncate mt-0.5">{template.description}</p>
-                      )}
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        Updated {new Date(template.updatedAt).toLocaleDateString('en-AU')}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="lg:col-span-8 space-y-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Template Name</label>
-                  <input
-                    value={templateName}
-                    onChange={(e) => setTemplateName(e.target.value)}
-                    placeholder="Round Recap"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Description</label>
-                  <input
-                    value={templateDescription}
-                    onChange={(e) => setTemplateDescription(e.target.value)}
-                    placeholder="Weekly competition summary"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Subject Template</label>
-                <input
-                  value={templateSubject}
-                  onChange={(e) => setTemplateSubject(e.target.value)}
-                  placeholder="Round {{roundNo}} recap for {{displayName}}"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">HTML Template</label>
-                <textarea
-                  value={templateHtml}
-                  onChange={(e) => setTemplateHtml(e.target.value)}
-                  rows={10}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-mono"
-                  placeholder={'<h1>Hi {{displayName}}</h1><p>Your best score is {{bestScore}}</p>'}
-                />
-              </div>
-
-              {activeTemplate && activeTemplate.tokens.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-slate-500 mb-1">Detected Tokens</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {activeTemplate.tokens.map((tokenName) => (
-                      <span key={tokenName} className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-medium">
-                        {tokenName}
-                      </span>
+          <div className="mt-5 grid gap-4 xl:grid-cols-12">
+            <aside className="xl:col-span-4 space-y-4">
+              <section className="border border-slate-200 rounded-xl p-3 bg-slate-50">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Template Library</p>
+                {templatesLoading ? (
+                  <p className="text-sm text-slate-500">Loading templates…</p>
+                ) : templates.length === 0 ? (
+                  <p className="text-sm text-slate-500">No templates yet.</p>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-auto pr-1">
+                    {templates.map((template) => (
+                      <button
+                        key={template.id}
+                        onClick={() => {
+                          setSelectedTemplateId(template.id)
+                          setTemplateStatus(null)
+                          setPreviewStatus(null)
+                        }}
+                        className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                          selectedTemplateId === template.id
+                            ? 'bg-emerald-50 border-emerald-300'
+                            : 'bg-white border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <p className="text-sm font-semibold text-slate-800 truncate">{template.name}</p>
+                        {template.description && (
+                          <p className="text-xs text-slate-500 truncate mt-0.5">{template.description}</p>
+                        )}
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Updated {new Date(template.updatedAt).toLocaleDateString('en-AU')}
+                        </p>
+                      </button>
                     ))}
                   </div>
+                )}
+              </section>
+
+              <section className="border border-slate-200 rounded-xl p-3 bg-slate-50">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Starter Layouts</p>
+                {starterTemplates.length === 0 ? (
+                  <p className="text-sm text-slate-500">No starter templates available.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {starterTemplates.map((starter) => (
+                      <button
+                        key={starter.name}
+                        onClick={() => applyStarterTemplate(starter)}
+                        className="w-full text-left rounded-lg border border-slate-200 bg-white px-3 py-2 hover:border-emerald-300 transition-colors"
+                      >
+                        <p className="text-sm font-semibold text-slate-800">{starter.name}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{starter.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="border border-slate-200 rounded-xl p-3 bg-slate-50">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Dynamic Data Tokens</p>
+                <div className="space-y-3 max-h-80 overflow-auto pr-1">
+                  {(['profile', 'season', 'performance', 'components'] as const).map((category) => {
+                    const items = tokenReference.filter((tokenItem) => tokenItem.category === category)
+                    if (items.length === 0) return null
+                    return (
+                      <div key={category}>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1">
+                          {category}
+                        </p>
+                        <div className="space-y-1.5">
+                          {items.map((tokenItem) => (
+                            <div key={tokenItem.token} className="rounded-lg border border-slate-200 bg-white p-2">
+                              <p className="text-xs font-semibold text-slate-800">{tokenItem.token}</p>
+                              <p className="text-[11px] text-slate-500 mt-0.5">{tokenItem.description}</p>
+                              <div className="mt-1.5 flex flex-wrap gap-1">
+                                <button
+                                  onClick={() => handleInsertToken(tokenItem.token, tokenItem.mode, 'subject')}
+                                  className="px-2 py-1 rounded border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50"
+                                >
+                                  Subject
+                                </button>
+                                <button
+                                  onClick={() => handleInsertToken(tokenItem.token, tokenItem.mode, 'html')}
+                                  className="px-2 py-1 rounded border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50"
+                                >
+                                  HTML
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              )}
+              </section>
+            </aside>
 
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={handleSaveTemplate}
-                  disabled={saveTemplateMutation.isPending}
-                  className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold disabled:opacity-50"
-                >
-                  {saveTemplateMutation.isPending ? 'Saving…' : selectedTemplateId ? 'Update Template' : 'Save Template'}
-                </button>
-                <button
-                  onClick={handleDeleteTemplate}
-                  disabled={!selectedTemplateId || deleteTemplateMutation.isPending}
-                  className="px-4 py-2 rounded-lg bg-red-50 text-red-600 border border-red-200 text-sm font-semibold disabled:opacity-50"
-                >
-                  Delete
-                </button>
-              </div>
-              {templateStatus && (
-                <p className={`text-sm font-medium ${templateStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
-                  {templateStatus}
-                </p>
-              )}
+            <section className="xl:col-span-8 space-y-4">
+              {templateMode === 'edit' ? (
+                <>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Template Name</label>
+                      <input
+                        value={templateName}
+                        onChange={(e) => setTemplateName(e.target.value)}
+                        placeholder="Round Recap"
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Description</label>
+                      <input
+                        value={templateDescription}
+                        onChange={(e) => setTemplateDescription(e.target.value)}
+                        placeholder="Weekly competition summary"
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm"
+                      />
+                    </div>
+                  </div>
 
-              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
-                <p className="text-sm font-bold text-slate-700">Preview</p>
-                <textarea
-                  value={previewSampleJson}
-                  onChange={(e) => setPreviewSampleJson(e.target.value)}
-                  rows={4}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-mono"
-                />
-                <button
-                  onClick={handlePreviewTemplate}
-                  disabled={previewTemplateMutation.isPending}
-                  className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50"
-                >
-                  {previewTemplateMutation.isPending ? 'Rendering…' : 'Render Preview'}
-                </button>
-                {previewStatus && (
-                  <p className={`text-sm font-medium ${previewStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
-                    {previewStatus}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Subject Template</label>
+                    <input
+                      ref={subjectInputRef}
+                      value={templateSubject}
+                      onChange={(e) => setTemplateSubject(e.target.value)}
+                      placeholder="Round {{roundNo}} recap for {{displayName}}"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm"
+                    />
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 p-3 bg-slate-50">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Quick Snippets</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => handleInsertHtmlSnippet('\n<h2>AFL Ladder</h2>\n{{{leagueLadderHtml}}}\n')}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      >
+                        Insert Ladder Table
+                      </button>
+                      <button
+                        onClick={() => handleInsertHtmlSnippet('\n<h2>Global Top 10</h2>\n{{{globalLeaderboardHtml}}}\n')}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      >
+                        Insert Leaderboard
+                      </button>
+                      <button
+                        onClick={() => handleInsertHtmlSnippet('\n<h2>Your Competitions</h2>\n{{{userCompetitionsHtml}}}\n')}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      >
+                        Insert User Comps
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">HTML Template</label>
+                    <textarea
+                      ref={htmlTextareaRef}
+                      value={templateHtml}
+                      onChange={(e) => setTemplateHtml(e.target.value)}
+                      rows={11}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-mono"
+                      placeholder={'<h1>Hi {{displayName}}</h1><p>Your best score is {{bestScore}}</p>'}
+                    />
+                  </div>
+
+                  {activeTemplate && activeTemplate.tokens.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 mb-1">Detected Tokens In Current Template</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {activeTemplate.tokens.map((tokenName) => (
+                          <span key={tokenName} className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-medium">
+                            {tokenName}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={handleSaveTemplate}
+                      disabled={saveTemplateMutation.isPending}
+                      className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold disabled:opacity-50"
+                    >
+                      {saveTemplateMutation.isPending ? 'Saving…' : selectedTemplateId ? 'Update Template' : 'Save Template'}
+                    </button>
+                    <button
+                      onClick={handleDeleteTemplate}
+                      disabled={!selectedTemplateId || deleteTemplateMutation.isPending}
+                      className="px-4 py-2 rounded-lg bg-red-50 text-red-600 border border-red-200 text-sm font-semibold disabled:opacity-50"
+                    >
+                      Delete
+                    </button>
+                    <button
+                      onClick={() => setTemplateMode('campaign')}
+                      className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50"
+                    >
+                      Next: Send Campaign
+                    </button>
+                  </div>
+                  {templateStatus && (
+                    <p className={`text-sm font-medium ${templateStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
+                      {templateStatus}
+                    </p>
+                  )}
+
+                  <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
+                    <p className="text-sm font-bold text-slate-700">Preview</p>
+                    <p className="text-xs text-slate-500">
+                      Optionally override sample values with JSON before rendering.
+                    </p>
+                    <textarea
+                      value={previewSampleJson}
+                      onChange={(e) => setPreviewSampleJson(e.target.value)}
+                      rows={4}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-mono"
+                    />
+                    <button
+                      onClick={handlePreviewTemplate}
+                      disabled={previewTemplateMutation.isPending}
+                      className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50"
+                    >
+                      {previewTemplateMutation.isPending ? 'Rendering…' : 'Render Preview'}
+                    </button>
+                    {previewStatus && (
+                      <p className={`text-sm font-medium ${previewStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
+                        {previewStatus}
+                      </p>
+                    )}
+                    {previewSubject && (
+                      <div className="rounded-lg border border-slate-200 bg-white p-3">
+                        <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Preview Subject</p>
+                        <p className="text-sm font-semibold text-slate-800 mt-1">{previewSubject}</p>
+                      </div>
+                    )}
+                    {previewHtml && (
+                      <div className="rounded-lg border border-slate-200 bg-white p-3">
+                        <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">Preview Body</p>
+                        <div className="max-h-64 overflow-auto" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
+                  <p className="text-sm font-bold text-slate-700">Send Campaign</p>
+                  <p className="text-xs text-slate-500">
+                    Recipients are deduplicated and sent once per user/email even if they appear in multiple selected lists.
                   </p>
-                )}
-                {previewSubject && (
-                  <div className="rounded-lg border border-slate-200 bg-white p-3">
-                    <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Preview Subject</p>
-                    <p className="text-sm font-semibold text-slate-800 mt-1">{previewSubject}</p>
-                  </div>
-                )}
-                {previewHtml && (
-                  <div className="rounded-lg border border-slate-200 bg-white p-3">
-                    <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">Preview Body</p>
-                    <div className="max-h-64 overflow-auto" dangerouslySetInnerHTML={{ __html: previewHtml }} />
-                  </div>
-                )}
-              </div>
 
-              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
-                <p className="text-sm font-bold text-slate-700">Send Campaign</p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => setAudienceMode('all')}
-                    className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
-                      audienceMode === 'all'
-                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                        : 'bg-white border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    All users
-                  </button>
-                  <button
-                    onClick={() => setAudienceMode('groups')}
-                    className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
-                      audienceMode === 'groups'
-                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                        : 'bg-white border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    Selected groups
-                  </button>
-                  <button
-                    onClick={() => setAudienceMode('test')}
-                    className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
-                      audienceMode === 'test'
-                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                        : 'bg-white border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    Test email
-                  </button>
-                </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => setAudienceMode('all')}
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
+                        audienceMode === 'all'
+                          ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      All users
+                    </button>
+                    <button
+                      onClick={() => setAudienceMode('groups')}
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
+                        audienceMode === 'groups'
+                          ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      Any selected list(s)
+                    </button>
+                    <button
+                      onClick={() => setAudienceMode('test')}
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
+                        audienceMode === 'test'
+                          ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      Test email
+                    </button>
+                  </div>
 
-                {audienceMode === 'groups' && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {groups.map((group) => {
-                      const selected = selectedGroupIds.includes(group.id)
-                      return (
+                  {audienceMode === 'groups' && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
                         <button
-                          key={group.id}
-                          onClick={() => toggleCampaignGroup(group.id)}
-                          className={`px-2 py-1 rounded-full border text-xs font-semibold ${
-                            selected
-                              ? 'bg-blue-100 border-blue-300 text-blue-700'
-                              : 'bg-white border-slate-200 text-slate-500'
-                          }`}
+                          onClick={() => setSelectedGroupIds(groups.map((group) => group.id))}
+                          className="px-2 py-1 rounded border border-slate-200 bg-white text-[11px] text-slate-600 hover:bg-slate-50"
                         >
-                          {selected ? '✓ ' : '+ '}
-                          {group.name}
+                          Select all lists
                         </button>
-                      )
-                    })}
-                  </div>
-                )}
+                        <button
+                          onClick={() => setSelectedGroupIds([])}
+                          className="px-2 py-1 rounded border border-slate-200 bg-white text-[11px] text-slate-600 hover:bg-slate-50"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {groups.map((group) => {
+                          const selected = selectedGroupIds.includes(group.id)
+                          return (
+                            <button
+                              key={group.id}
+                              onClick={() => toggleCampaignGroup(group.id)}
+                              className={`px-2 py-1 rounded-full border text-xs font-semibold ${
+                                selected
+                                  ? 'bg-blue-100 border-blue-300 text-blue-700'
+                                  : 'bg-white border-slate-200 text-slate-500'
+                              }`}
+                            >
+                              {selected ? '✓ ' : '+ '}
+                              {group.name}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
 
-                {audienceMode === 'test' && (
-                  <input
-                    value={testEmail}
-                    onChange={(e) => setTestEmail(e.target.value)}
-                    placeholder="test@example.com"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm"
-                  />
-                )}
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Season ID</label>
+                  {audienceMode === 'test' && (
                     <input
-                      value={campaignSeasonId}
-                      onChange={(e) => setCampaignSeasonId(e.target.value)}
+                      value={testEmail}
+                      onChange={(e) => setTestEmail(e.target.value)}
+                      placeholder="test@example.com"
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm"
                     />
+                  )}
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Season ID</label>
+                      <input
+                        value={campaignSeasonId}
+                        onChange={(e) => setCampaignSeasonId(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Round Number (optional)</label>
+                      <input
+                        value={campaignRoundNo}
+                        onChange={(e) => setCampaignRoundNo(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm"
+                      />
+                    </div>
                   </div>
+
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Round Number (optional)</label>
-                    <input
-                      value={campaignRoundNo}
-                      onChange={(e) => setCampaignRoundNo(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm"
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Custom Data JSON</label>
+                    <textarea
+                      value={campaignCustomDataJson}
+                      onChange={(e) => setCampaignCustomDataJson(e.target.value)}
+                      rows={4}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-mono"
                     />
                   </div>
+
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={campaignDryRun}
+                      onChange={(e) => setCampaignDryRun(e.target.checked)}
+                      className="rounded border-slate-300"
+                    />
+                    Dry run only (preview payload, do not send)
+                  </label>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => setTemplateMode('edit')}
+                      className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50"
+                    >
+                      Back to Template
+                    </button>
+                    <button
+                      onClick={handleSendCampaign}
+                      disabled={sendCampaignMutation.isPending || !selectedTemplateId}
+                      className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600 disabled:opacity-50"
+                    >
+                      {sendCampaignMutation.isPending ? 'Running…' : campaignDryRun ? 'Run Dry Preview' : 'Send Campaign'}
+                    </button>
+                  </div>
+
+                  {campaignStatus && (
+                    <p className={`text-sm font-medium ${campaignStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
+                      {campaignStatus}
+                    </p>
+                  )}
                 </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Custom Data JSON</label>
-                  <textarea
-                    value={campaignCustomDataJson}
-                    onChange={(e) => setCampaignCustomDataJson(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-mono"
-                  />
-                </div>
-
-                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={campaignDryRun}
-                    onChange={(e) => setCampaignDryRun(e.target.checked)}
-                    className="rounded border-slate-300"
-                  />
-                  Dry run only (preview payload, do not send)
-                </label>
-
-                <button
-                  onClick={handleSendCampaign}
-                  disabled={sendCampaignMutation.isPending || !selectedTemplateId}
-                  className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600 disabled:opacity-50"
-                >
-                  {sendCampaignMutation.isPending ? 'Running…' : campaignDryRun ? 'Run Dry Preview' : 'Send Campaign'}
-                </button>
-
-                {campaignStatus && (
-                  <p className={`text-sm font-medium ${campaignStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
-                    {campaignStatus}
-                  </p>
-                )}
-              </div>
-            </div>
+              )}
+            </section>
           </div>
         </div>
 

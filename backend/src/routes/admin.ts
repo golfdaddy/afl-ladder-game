@@ -21,6 +21,7 @@ router.get('/users', authMiddleware, requireAdmin, asyncHandler(AdminController.
 router.put('/users/:id/role', authMiddleware, requireAdmin, asyncHandler(AdminController.setUserRole))
 router.put('/seasons/:seasonId/cutoff', authMiddleware, requireAdmin, asyncHandler(AdminController.setSeasonCutoff))
 router.get('/email/templates', authMiddleware, requireAdmin, asyncHandler(AdminController.listEmailTemplates))
+router.get('/email/template-reference', authMiddleware, requireAdmin, asyncHandler(AdminController.getEmailTemplateReference))
 router.post('/email/templates', authMiddleware, requireAdmin, asyncHandler(AdminController.createEmailTemplate))
 router.put('/email/templates/:id', authMiddleware, requireAdmin, asyncHandler(AdminController.updateEmailTemplate))
 router.delete('/email/templates/:id', authMiddleware, requireAdmin, asyncHandler(AdminController.deleteEmailTemplate))

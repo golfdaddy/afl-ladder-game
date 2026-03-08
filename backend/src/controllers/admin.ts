@@ -10,6 +10,12 @@ import { SeasonModel } from '../models/season'
 import { EmailTemplateModel } from '../models/emailTemplate'
 import { renderTemplate, extractTemplateTokens } from '../utils/templateRenderer'
 import { sendEmail } from '../services/email'
+import {
+  EMAIL_TEMPLATE_STARTERS,
+  EMAIL_TEMPLATE_TOKEN_REFERENCE,
+  buildEmailDynamicData,
+  getEmailTemplateSampleData,
+} from '../utils/emailTemplateData'
 
 export class AdminController {
   /** Manual ladder upload (18 teams with full stats) */
@@ -219,10 +225,19 @@ export class AdminController {
     }
   }
 
+  /** Admin: token docs + starter snippets for email template builder */
+  static async getEmailTemplateReference(_req: Request, res: Response) {
+    res.json({
+      tokenReference: EMAIL_TEMPLATE_TOKEN_REFERENCE,
+      starterTemplates: EMAIL_TEMPLATE_STARTERS,
+    })
+  }
+
   /** Admin: list reusable email templates */
   static async listEmailTemplates(_req: Request, res: Response) {
     const templates = await EmailTemplateModel.list()
     res.json({
+      tokenReference: EMAIL_TEMPLATE_TOKEN_REFERENCE,
       templates: templates.map((t) => ({
         ...t,
         tokens: extractTemplateTokens(`${t.subjectTemplate}\n${t.htmlTemplate}`),
@@ -313,6 +328,10 @@ export class AdminController {
   static async previewEmailTemplate(req: AuthRequest, res: Response) {
     const subjectTemplate = String(req.body?.subjectTemplate || '').trim()
     const htmlTemplate = String(req.body?.htmlTemplate || '').trim()
+    const seasonIdRaw = req.body?.seasonId
+    const seasonId = seasonIdRaw === undefined || seasonIdRaw === null || seasonIdRaw === ''
+      ? null
+      : Number(seasonIdRaw)
     const sampleData = req.body?.sampleData && typeof req.body.sampleData === 'object' && !Array.isArray(req.body.sampleData)
       ? req.body.sampleData
       : {}
@@ -320,15 +339,18 @@ export class AdminController {
     if (!subjectTemplate || !htmlTemplate) {
       return res.status(400).json({ error: 'subjectTemplate and htmlTemplate are required' })
     }
+    if (seasonId !== null && (!Number.isFinite(seasonId) || seasonId <= 0)) {
+      return res.status(400).json({ error: 'seasonId must be a positive number' })
+    }
+
+    const dynamicData = await buildEmailDynamicData({
+      seasonId,
+      recipientUserIds: [],
+    })
 
     const baseSample = {
-      displayName: 'Matt',
-      email: 'matt@example.com',
-      seasonYear: new Date().getFullYear(),
-      roundNo: 1,
-      competitionCount: 3,
-      predictionCount: 1,
-      bestScore: 66,
+      ...getEmailTemplateSampleData(),
+      ...dynamicData.globalData,
       ...sampleData,
     }
 
@@ -338,6 +360,8 @@ export class AdminController {
         html: renderTemplate(htmlTemplate, baseSample),
       },
       tokens: extractTemplateTokens(`${subjectTemplate}\n${htmlTemplate}`),
+      tokenReference: EMAIL_TEMPLATE_TOKEN_REFERENCE,
+      starterTemplates: EMAIL_TEMPLATE_STARTERS,
     })
   }
 
@@ -428,7 +452,15 @@ export class AdminController {
       }
     }
 
-    recipients = recipients.filter((r) => !!r.email)
+    const uniqueRecipients = new Map<string, { id: number | null; email: string; displayName: string }>()
+    for (const recipient of recipients) {
+      if (!recipient.email) continue
+      const key = recipient.email.trim().toLowerCase()
+      if (!key || uniqueRecipients.has(key)) continue
+      uniqueRecipients.set(key, recipient)
+    }
+
+    recipients = Array.from(uniqueRecipients.values())
     if (recipients.length === 0) {
       return res.status(400).json({ error: 'No recipients found' })
     }
@@ -462,10 +494,22 @@ export class AdminController {
       }
     }
 
+    const dynamicData = await buildEmailDynamicData({
+      seasonId: effectiveSeasonId,
+      recipientUserIds: recipientsWithUserIds.map((recipient) => recipient.id),
+    })
+    const sampleData = getEmailTemplateSampleData()
+
     const rendered = recipients.map((recipient) => {
       const stats = recipient.id !== null
         ? statsByUserId.get(recipient.id) || { competitionCount: 0, predictionCount: 0, bestScore: null }
         : { competitionCount: 0, predictionCount: 0, bestScore: null }
+      const perUserDynamic = recipient.id !== null
+        ? dynamicData.perUserData.get(recipient.id) || {}
+        : {
+            userCompetitionsHtml: sampleData.userCompetitionsHtml,
+            userCompetitionsCount: sampleData.userCompetitionsCount,
+          }
 
       const context = {
         displayName: recipient.displayName,
@@ -477,6 +521,8 @@ export class AdminController {
         competitionCount: stats.competitionCount,
         predictionCount: stats.predictionCount,
         bestScore: stats.bestScore,
+        ...dynamicData.globalData,
+        ...perUserDynamic,
         ...customData,
       }
 
@@ -493,6 +539,7 @@ export class AdminController {
         recipientCount: rendered.length,
         preview: rendered.slice(0, 3),
         tokens: extractTemplateTokens(`${template.subjectTemplate}\n${template.htmlTemplate}`),
+        tokenReference: EMAIL_TEMPLATE_TOKEN_REFERENCE,
       })
     }
 
