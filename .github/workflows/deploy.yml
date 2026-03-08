@@ -6,7 +6,8 @@ on:
 
 jobs:
   deploy-frontend:
-    name: Deploy Frontend to Vercel
+    name: Deploy Frontend to Vercel (Opt-in)
+    if: ${{ vars.ENABLE_GITHUB_VERCEL_DEPLOY == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
