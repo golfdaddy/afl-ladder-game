@@ -12,6 +12,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Australia/Melbourne';
 
 // Middleware
 app.use(helmet());
@@ -61,17 +62,22 @@ db.connect()
       console.log(`Server running on port ${PORT}`);
     });
 
-    // Schedule automatic AFL ladder sync from Squiggle every 30 minutes (production only)
+    // Schedule automatic AFL ladder sync from Squiggle in Melbourne time (production only)
     if (process.env.NODE_ENV === 'production') {
-      cron.schedule('*/30 * * * *', () => {
+      cron.schedule('0 * * * 6,0', () => {
         syncLadderFromSquiggle();
-      });
-      console.log('[LadderSync] Scheduled: syncing AFL ladder from Squiggle every 30 minutes');
+      }, { timezone: APP_TIMEZONE });
+      console.log(`[LadderSync] Scheduled: hourly on weekends in ${APP_TIMEZONE}`);
+
+      cron.schedule('0 22 * * 1-5', () => {
+        syncLadderFromSquiggle();
+      }, { timezone: APP_TIMEZONE });
+      console.log(`[LadderSync] Scheduled: weekdays at 10:00 PM in ${APP_TIMEZONE}`);
 
       cron.schedule('*/30 * * * *', () => {
         runFantasySyncJobs()
-      })
-      console.log('[FantasySync] Scheduled: ingestion/pricing/scoring every 30 minutes')
+      }, { timezone: APP_TIMEZONE })
+      console.log(`[FantasySync] Scheduled: ingestion/pricing/scoring every 30 minutes in ${APP_TIMEZONE}`)
     }
   })
   .catch((err) => {
