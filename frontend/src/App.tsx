@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from './store/auth'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 // Pages
 import LoginPage from './pages/LoginPage'
@@ -11,9 +12,16 @@ import PredictionPage from './pages/PredictionPage'
 import LeaderboardPage from './pages/LeaderboardPage'
 import InviteAcceptPage from './pages/InviteAcceptPage'
 import AdminPage from './pages/AdminPage'
+import UserLadderPage from './pages/UserLadderPage'
 import NotFoundPage from './pages/NotFoundPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
+import FantasyDashboardPage from './pages/FantasyDashboardPage'
+import FantasyCompetitionPage from './pages/FantasyCompetitionPage'
+import FantasyTeamPage from './pages/FantasyTeamPage'
+import FantasyLeaderboardPage from './pages/FantasyLeaderboardPage'
+import FantasyInviteAcceptPage from './pages/FantasyInviteAcceptPage'
+import { FEATURE_FANTASY7_ENABLED } from './config'
 
 const queryClient = new QueryClient()
 
@@ -35,6 +43,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
+    <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
@@ -76,6 +85,14 @@ function App() {
             }
           />
           <Route
+            path="/ladder/:userId"
+            element={
+              <ProtectedRoute>
+                <UserLadderPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/admin"
             element={
               <AdminRoute>
@@ -83,11 +100,56 @@ function App() {
               </AdminRoute>
             }
           />
+          {FEATURE_FANTASY7_ENABLED && (
+            <>
+              <Route
+                path="/fantasy/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <FantasyDashboardPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/fantasy/competition/:id"
+                element={
+                  <ProtectedRoute>
+                    <FantasyCompetitionPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/fantasy/team/:competitionId/:roundId"
+                element={
+                  <ProtectedRoute>
+                    <FantasyTeamPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/fantasy/leaderboard/:competitionId"
+                element={
+                  <ProtectedRoute>
+                    <FantasyLeaderboardPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/fantasy/invite/:token"
+                element={
+                  <ProtectedRoute>
+                    <FantasyInviteAcceptPage />
+                  </ProtectedRoute>
+                }
+              />
+            </>
+          )}
           <Route path="/" element={<Navigate to="/dashboard" />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>
+    </ErrorBoundary>
   )
 }
 
