@@ -3,7 +3,8 @@ import { useAuthStore } from '../store/auth'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
-import { COMPETITION_LOCKED, CUTOFF } from '../config'
+import { SEASON_OVER, FEATURE_FANTASY7_ENABLED } from '../config'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 function useCountdown(target: Date) {
   const calc = () => {
@@ -60,22 +61,35 @@ interface MemberPrediction {
   ladder: string[]
 }
 
+interface EmailPreferenceGroup {
+  id: number
+  name: string
+  description: string | null
+}
+
 export default function DashboardPage() {
   const user = useAuthStore((state) => state.user)
   const isAdmin = useAuthStore((state) => state.isAdmin)
   const logout = useAuthStore((state) => state.logout)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const countdown = useCountdown(CUTOFF)
+  const { seasonId, seasonYear, cutoffAt, isLocked: competitionLocked } = useCurrentSeason()
+  const countdown = useCountdown(cutoffAt)
 
   const [activePanel, setActivePanel] = useState<'none' | 'create' | 'join'>('none')
   const [formData, setFormData] = useState({ name: '', description: '', isPublic: false })
   const [joinCode, setJoinCode] = useState('')
   const [createError, setCreateError] = useState('')
   const [joinError, setJoinError] = useState('')
+  const [mailingPrefStatus, setMailingPrefStatus] = useState<string | null>(null)
+  const [mailingPrefDraft, setMailingPrefDraft] = useState<number[]>([])
   const [copiedId, setCopiedId] = useState<number | null>(null)
   // Collapse competitions list by default when locked (spotlight section is the main view)
-  const [showComps, setShowComps] = useState(!COMPETITION_LOCKED)
+  const [showComps, setShowComps] = useState(!competitionLocked)
+
+  useEffect(() => {
+    if (competitionLocked) setShowComps(false)
+  }, [competitionLocked])
 
   // Fetch user's competitions
   const { data: competitions = [], isLoading } = useQuery({
@@ -95,6 +109,23 @@ export default function DashboardPage() {
     }
   })
 
+  // User email-list preferences
+  const { data: emailPreferences, isLoading: emailPreferencesLoading } = useQuery({
+    queryKey: ['email-preferences'],
+    queryFn: async () => {
+      const response = await api.get('/auth/email-preferences')
+      return response.data as {
+        groups: EmailPreferenceGroup[]
+        subscribedGroupIds: number[]
+      }
+    }
+  })
+
+  useEffect(() => {
+    if (!emailPreferences) return
+    setMailingPrefDraft(emailPreferences.subscribedGroupIds || [])
+  }, [emailPreferences])
+
   // First competition (for the locked dashboard spotlight)
   const firstComp = (competitions as Competition[])[0]
 
@@ -105,7 +136,7 @@ export default function DashboardPage() {
       const response = await api.get(`/leaderboards/competition/${firstComp.id}`)
       return (response.data.leaderboard || []) as LeaderboardEntry[]
     },
-    enabled: COMPETITION_LOCKED && !!firstComp,
+    enabled: competitionLocked && !!firstComp,
   })
 
   // Member predictions for first competition (only when locked)
@@ -115,8 +146,28 @@ export default function DashboardPage() {
       const response = await api.get(`/competitions/${firstComp.id}/predictions`)
       return (response.data.predictions || []) as MemberPrediction[]
     },
-    enabled: COMPETITION_LOCKED && !!firstComp,
+    enabled: competitionLocked && !!firstComp,
   })
+
+  // Fetch current AFL ladder for side-by-side comparison
+  const { data: aflLadderData } = useQuery({
+    queryKey: ['afl-ladder', seasonId],
+    queryFn: async () => {
+      const response = await api.get(`/admin/afl-ladder/${seasonId}`)
+      return response.data
+    },
+    enabled: competitionLocked && seasonId > 0,
+    retry: false,
+  })
+
+  // AFL current ladder — sorted by position ascending → array of team names
+  const aflTeams: string[] = (() => {
+    const teams = aflLadderData?.ladder?.teams
+    if (!Array.isArray(teams) || teams.length === 0) return []
+    return [...teams]
+      .sort((a: any, b: any) => a.position - b.position)
+      .map((t: any) => t.teamName)
+  })()
 
   // Accept invite mutation
   const acceptInviteMutation = useMutation({
@@ -138,7 +189,7 @@ export default function DashboardPage() {
   // Create competition mutation
   const createMutation = useMutation({
     mutationFn: (data: typeof formData) =>
-      api.post('/competitions', { seasonId: 1, ...data }),
+      api.post('/competitions', { seasonId, ...data }),
     onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['competitions'] })
       setActivePanel('none')
@@ -169,6 +220,18 @@ export default function DashboardPage() {
     onError: (err: any) => {
       setJoinError(err.response?.data?.error || 'Invalid code. Please try again.')
     }
+  })
+
+  const updateEmailPreferencesMutation = useMutation({
+    mutationFn: (groupIds: number[]) =>
+      api.put('/auth/email-preferences', { groupIds }),
+    onSuccess: (response) => {
+      queryClient.setQueryData(['email-preferences'], response.data)
+      setMailingPrefStatus('✅ Email preferences saved')
+    },
+    onError: (err: any) => {
+      setMailingPrefStatus(`❌ ${err.response?.data?.error || 'Failed to save preferences'}`)
+    },
   })
 
   const handleLogout = () => {
@@ -212,6 +275,22 @@ export default function DashboardPage() {
     setJoinError('')
   }
 
+  const setMailingListPreference = (groupId: number, subscribe: boolean) => {
+    setMailingPrefStatus(null)
+    setMailingPrefDraft((prev) => {
+      if (subscribe) return Array.from(new Set([...prev, groupId]))
+      return prev.filter((id) => id !== groupId)
+    })
+  }
+
+  const saveMailingPreferences = () => {
+    setMailingPrefStatus(null)
+    updateEmailPreferencesMutation.mutate(mailingPrefDraft)
+  }
+
+  const mailingGroups = emailPreferences?.groups || []
+  const mailingSelection = new Set(mailingPrefDraft)
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Dark Nav */}
@@ -234,6 +313,14 @@ export default function DashboardPage() {
                   className="px-3 py-1.5 text-sm font-medium text-emerald-400 hover:text-emerald-300 border border-emerald-800 hover:border-emerald-600 rounded-lg transition-colors flex items-center gap-1.5"
                 >
                   🛡️ Admin
+                </button>
+              )}
+              {FEATURE_FANTASY7_ENABLED && (
+                <button
+                  onClick={() => navigate('/fantasy/dashboard')}
+                  className="px-3 py-1.5 text-sm font-medium text-blue-300 hover:text-blue-200 border border-blue-900 hover:border-blue-700 rounded-lg transition-colors"
+                >
+                  Fantasy 7
                 </button>
               )}
               <button
@@ -301,7 +388,7 @@ export default function DashboardPage() {
         )}
 
         {/* ── Locked Banner or Cutoff Countdown ── */}
-        {COMPETITION_LOCKED ? (
+        {competitionLocked ? (
           <div className="mb-6 rounded-2xl px-5 py-4 flex flex-wrap items-center justify-between gap-4 bg-slate-900 border border-slate-700">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-red-600">
@@ -312,12 +399,12 @@ export default function DashboardPage() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-red-400">🔒 Competition locked</p>
                 <p className="text-slate-300 text-sm font-medium">
-                  The 2026 AFL season is underway — good luck!
+                  The {seasonYear} AFL season is underway — good luck!
                 </p>
               </div>
             </div>
             <button
-              onClick={() => navigate('/prediction/1')}
+              onClick={() => navigate(`/prediction/${seasonId}`)}
               className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl text-sm transition-colors"
             >
               View My Prediction
@@ -369,7 +456,7 @@ export default function DashboardPage() {
                 </div>
               ))}
               <button
-                onClick={() => navigate('/prediction/1')}
+                onClick={() => navigate(`/prediction/${seasonId}`)}
                 className={`ml-2 px-4 py-2 text-white font-bold rounded-xl text-sm transition-colors ${
                   countdown.days === 0
                     ? 'bg-red-500 hover:bg-red-600'
@@ -384,44 +471,48 @@ export default function DashboardPage() {
           </div>
         ) : null}
 
-        {/* Quick Actions */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-8">
-          <button
-            onClick={() => togglePanel('create')}
-            className={`flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all ${
-              activePanel === 'create'
-                ? 'border-emerald-500 bg-emerald-50'
-                : 'border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/50'
-            }`}
-          >
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${activePanel === 'create' ? 'bg-emerald-500' : 'bg-emerald-100'}`}>
-              <svg className={`w-5 h-5 ${activePanel === 'create' ? 'text-white' : 'text-emerald-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-            </div>
-            <span className="font-bold text-slate-900 text-sm">Create</span>
-            <span className="text-xs text-slate-400 mt-0.5">New competition</span>
-          </button>
+        {/* Quick Actions — Create/Join hidden during active season, re-appear after season ends */}
+        <div className="grid gap-3 mb-8 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+          {(!competitionLocked || SEASON_OVER) && (
+            <button
+              onClick={() => togglePanel('create')}
+              className={`flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all ${
+                activePanel === 'create'
+                  ? 'border-emerald-500 bg-emerald-50'
+                  : 'border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/50'
+              }`}
+            >
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${activePanel === 'create' ? 'bg-emerald-500' : 'bg-emerald-100'}`}>
+                <svg className={`w-5 h-5 ${activePanel === 'create' ? 'text-white' : 'text-emerald-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </div>
+              <span className="font-bold text-slate-900 text-sm">Create</span>
+              <span className="text-xs text-slate-400 mt-0.5">New competition</span>
+            </button>
+          )}
+
+          {(!competitionLocked || SEASON_OVER) && (
+            <button
+              onClick={() => togglePanel('join')}
+              className={`flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all ${
+                activePanel === 'join'
+                  ? 'border-emerald-500 bg-emerald-50'
+                  : 'border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/50'
+              }`}
+            >
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${activePanel === 'join' ? 'bg-emerald-500' : 'bg-slate-100'}`}>
+                <svg className={`w-5 h-5 ${activePanel === 'join' ? 'text-white' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0" />
+                </svg>
+              </div>
+              <span className="font-bold text-slate-900 text-sm">Join</span>
+              <span className="text-xs text-slate-400 mt-0.5">Use a code</span>
+            </button>
+          )}
 
           <button
-            onClick={() => togglePanel('join')}
-            className={`flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all ${
-              activePanel === 'join'
-                ? 'border-emerald-500 bg-emerald-50'
-                : 'border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/50'
-            }`}
-          >
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${activePanel === 'join' ? 'bg-emerald-500' : 'bg-slate-100'}`}>
-              <svg className={`w-5 h-5 ${activePanel === 'join' ? 'text-white' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0" />
-              </svg>
-            </div>
-            <span className="font-bold text-slate-900 text-sm">Join</span>
-            <span className="text-xs text-slate-400 mt-0.5">Use a code</span>
-          </button>
-
-          <button
-            onClick={() => navigate('/prediction/1')}
+            onClick={() => navigate(`/prediction/${seasonId}`)}
             className="flex flex-col items-center justify-center p-5 rounded-2xl border-2 border-slate-200 bg-white hover:border-amber-300 hover:bg-amber-50/50 transition-all"
           >
             <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center mb-2">
@@ -429,8 +520,8 @@ export default function DashboardPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
               </svg>
             </div>
-            <span className="font-bold text-slate-900 text-sm">{COMPETITION_LOCKED ? 'My Ladder' : 'Predict'}</span>
-            <span className="text-xs text-slate-400 mt-0.5">{COMPETITION_LOCKED ? 'View submission' : 'Your 2026 ladder'}</span>
+            <span className="font-bold text-slate-900 text-sm">{competitionLocked ? 'My Ladder' : 'Predict'}</span>
+            <span className="text-xs text-slate-400 mt-0.5">{competitionLocked ? 'View submission' : `Your ${seasonYear} ladder`}</span>
           </button>
 
           <button
@@ -445,6 +536,74 @@ export default function DashboardPage() {
             <span className="font-bold text-slate-900 text-sm">Leaderboard</span>
             <span className="text-xs text-slate-400 mt-0.5">Global rankings</span>
           </button>
+        </div>
+
+        <div className="mb-8 bg-white rounded-2xl border border-slate-200 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Mailing Lists</h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Choose which update lists you receive. Admin campaigns can target any/all lists and send once per user.
+              </p>
+            </div>
+            <button
+              onClick={saveMailingPreferences}
+              disabled={updateEmailPreferencesMutation.isPending || emailPreferencesLoading}
+              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold disabled:opacity-50"
+            >
+              {updateEmailPreferencesMutation.isPending ? 'Saving…' : 'Save Preferences'}
+            </button>
+          </div>
+
+          {emailPreferencesLoading ? (
+            <p className="mt-4 text-sm text-slate-500">Loading mailing lists…</p>
+          ) : mailingGroups.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">No mailing lists available.</p>
+          ) : (
+            <div className="mt-4 divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden">
+              {mailingGroups.map((group) => {
+                const subscribed = mailingSelection.has(group.id)
+                return (
+                  <div key={group.id} className="px-4 py-3 bg-slate-50/50 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{group.name}</p>
+                      {group.description && (
+                        <p className="text-xs text-slate-500 mt-0.5">{group.description}</p>
+                      )}
+                    </div>
+                    <div className="inline-flex rounded-lg border border-slate-200 bg-white overflow-hidden">
+                      <label className={`px-3 py-1.5 text-xs font-semibold cursor-pointer ${subscribed ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500'}`}>
+                        <input
+                          type="radio"
+                          name={`mailing-group-${group.id}`}
+                          className="sr-only"
+                          checked={subscribed}
+                          onChange={() => setMailingListPreference(group.id, true)}
+                        />
+                        Subscribed
+                      </label>
+                      <label className={`px-3 py-1.5 text-xs font-semibold cursor-pointer border-l border-slate-200 ${!subscribed ? 'bg-slate-100 text-slate-700' : 'text-slate-500'}`}>
+                        <input
+                          type="radio"
+                          name={`mailing-group-${group.id}`}
+                          className="sr-only"
+                          checked={!subscribed}
+                          onChange={() => setMailingListPreference(group.id, false)}
+                        />
+                        Off
+                      </label>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {mailingPrefStatus && (
+            <p className={`mt-3 text-sm font-medium ${mailingPrefStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
+              {mailingPrefStatus}
+            </p>
+          )}
         </div>
 
         {/* Create Panel */}
@@ -570,47 +729,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Season score summary — only shown when at least one competition has scoring */}
-        {(() => {
-          const scored = (competitions as Competition[]).filter(c => c.userScore !== null)
-          if (scored.length === 0) return null
-          const bestScore = Math.min(...scored.map(c => c.userScore!))
-          const bestRank  = Math.min(...scored.filter(c => c.userRank !== null).map(c => c.userRank!))
-          const bestComp  = scored.find(c => c.userScore === bestScore)
-          return (
-            <div className="mb-6 bg-slate-900 rounded-2xl px-5 py-5 flex flex-wrap gap-5 items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest">2026 Season</p>
-                <p className="text-slate-300 text-sm mt-0.5">
-                  Your best score is in <span className="text-white font-bold">{bestComp?.name}</span>
-                </p>
-              </div>
-              <div className="flex gap-6">
-                <div className="text-center">
-                  <p className="text-3xl font-black text-emerald-400">{bestScore}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">best pts</p>
-                </div>
-                {bestRank && bestRank !== Infinity && (
-                  <div className="text-center">
-                    <p className="text-3xl font-black text-amber-400">#{bestRank}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">best rank</p>
-                  </div>
-                )}
-                <div className="text-center">
-                  <p className="text-3xl font-black text-white">{scored.length}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">competing</p>
-                </div>
-              </div>
-              <button
-                onClick={() => navigate('/prediction/1')}
-                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm transition-colors flex-shrink-0"
-              >
-                View Scores
-              </button>
-            </div>
-          )
-        })()}
-
         {/* Competitions List */}
         <div>
           <button
@@ -721,15 +839,15 @@ export default function DashboardPage() {
 
                   {/* Actions */}
                   <div className="px-5 pb-5 flex gap-2">
-                    {!COMPETITION_LOCKED && !comp.userHasSubmitted && (
+                    {!competitionLocked && !comp.userHasSubmitted && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); navigate('/prediction/1') }}
+                        onClick={(e) => { e.stopPropagation(); navigate(`/prediction/${seasonId}`) }}
                         className="flex-1 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-colors"
                       >
                         Submit Prediction
                       </button>
                     )}
-                    {!COMPETITION_LOCKED && comp.userHasSubmitted && (
+                    {!competitionLocked && comp.userHasSubmitted && (
                       <button
                         onClick={(e) => handleCopyCode(comp, e)}
                         className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
@@ -769,7 +887,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Competition Spotlight (locked: show leaderboard + ladders for first comp) ── */}
-        {COMPETITION_LOCKED && firstComp && (
+        {competitionLocked && firstComp && (
           <div className="mt-8 space-y-6">
             <div className="flex items-center gap-3">
               <h2 className="text-sm font-bold text-slate-700 uppercase tracking-widest">
@@ -802,7 +920,7 @@ export default function DashboardPage() {
                     const isMe = entry.userId === user?.id
                     const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null
                     return (
-                      <div key={entry.userId} className={`flex items-center gap-3 px-5 py-3 ${isMe ? 'bg-emerald-50/60' : ''}`}>
+                      <div key={entry.userId} className={`flex items-center gap-3 px-5 py-3 ${isMe ? 'bg-emerald-50/60' : 'hover:bg-slate-50'} transition-colors`}>
                         <div className="w-7 text-center flex-shrink-0">
                           {medal ? (
                             <span className="text-base">{medal}</span>
@@ -810,9 +928,14 @@ export default function DashboardPage() {
                             <span className="text-xs font-bold text-slate-400">#{idx + 1}</span>
                           )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="font-semibold text-slate-900 text-sm truncate">{entry.displayName}</span>
-                          {isMe && <span className="ml-2 text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold">You</span>}
+                        <div className="flex-1 min-w-0 flex items-center gap-2">
+                          <button
+                            onClick={() => navigate(`/ladder/${entry.userId}`)}
+                            className="font-semibold text-slate-900 text-sm truncate hover:text-emerald-700 hover:underline transition-colors text-left"
+                          >
+                            {entry.displayName}
+                          </button>
+                          {isMe && <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>}
                         </div>
                         <div className="text-right flex-shrink-0">
                           <span className="text-base font-black text-slate-900">{entry.totalPoints}</span>
@@ -825,47 +948,140 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Everyone's Ladders */}
+            {/* Everyone's Ladders — horizontal scroll comparison */}
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2 flex-wrap">
                 <span className="text-base">🔒</span>
-                <h3 className="font-bold text-slate-900 text-sm">Everyone's Ladder</h3>
-                <span className="text-xs text-slate-400 ml-1">· all submissions revealed</span>
+                <h3 className="font-bold text-slate-900 text-sm">League Ladders</h3>
+                <span className="text-xs text-slate-400">· scroll right to compare</span>
+                {aflTeams.length > 0 && (
+                  <span className="inline-flex items-center gap-1 text-xs text-emerald-600 font-medium ml-1">
+                    <span className="w-2 h-2 bg-emerald-500 rounded-full inline-block" />
+                    = matches AFL Now
+                  </span>
+                )}
               </div>
               {spotlightPredictions.length === 0 ? (
                 <div className="px-5 py-8 text-center text-slate-400 text-sm">No submissions found.</div>
               ) : (
-                <div className="divide-y divide-slate-100">
-                  {spotlightPredictions.map((mp) => {
-                    const isMe = mp.userId === user?.id
-                    return (
-                      <div key={mp.userId} className={`px-5 py-4 ${isMe ? 'bg-emerald-50/40' : ''}`}>
-                        <div className="flex items-center gap-2 mb-2.5">
-                          <div className="w-7 h-7 bg-slate-100 rounded-full flex items-center justify-center flex-shrink-0">
-                            <span className="text-xs font-bold text-slate-500">{mp.displayName.charAt(0).toUpperCase()}</span>
-                          </div>
-                          <span className="font-bold text-slate-900 text-sm">{mp.displayName}</span>
-                          {isMe && <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold">You</span>}
+                <div className="flex">
+                  {/* ── LEFT: sticky position # + AFL Now columns ── */}
+                  <div
+                    className="flex-shrink-0 z-10 bg-white"
+                    style={{ boxShadow: '3px 0 8px -3px rgba(0,0,0,0.15)' }}
+                  >
+                    <div className="flex">
+                      {/* Position # column */}
+                      <div className="w-10 flex flex-col">
+                        <div className="h-14 flex items-end pb-3 px-2 border-b border-slate-100 bg-white">
+                          <span className="text-xs font-bold text-slate-400">#</span>
                         </div>
-                        <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
-                          {mp.ladder.map((teamName, idx) => {
-                            const pos = idx + 1
-                            const cls =
-                              pos <= 4  ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
-                              pos <= 8  ? 'bg-blue-50 border-blue-200 text-blue-800' :
-                              pos <= 14 ? 'bg-slate-50 border-slate-200 text-slate-600' :
-                              'bg-red-50 border-red-200 text-red-700'
-                            return (
-                              <div key={pos} className={`flex items-center gap-1 border rounded-lg px-2 py-1 ${cls}`}>
-                                <span className="text-xs font-black w-4 flex-shrink-0">{pos}</span>
-                                <span className="text-xs font-semibold truncate">{teamName.split(' ').pop()}</span>
-                              </div>
-                            )
-                          })}
-                        </div>
+                        {Array.from({ length: 18 }, (_, i) => {
+                          const pos = i + 1
+                          const zoneClass =
+                            pos <= 4  ? 'bg-emerald-50/80' :
+                            pos <= 8  ? 'bg-blue-50/50' :
+                            pos <= 14 ? 'bg-white' :
+                                        'bg-red-50/50'
+                          return (
+                            <div key={pos} className={`h-9 flex items-center justify-end pr-2 border-b border-slate-50 ${zoneClass}`}>
+                              <span className="text-xs font-black text-slate-400">{pos}</span>
+                            </div>
+                          )
+                        })}
                       </div>
-                    )
-                  })}
+                      {/* AFL Now column */}
+                      {aflTeams.length > 0 && (
+                        <div className="w-32 flex flex-col bg-slate-900">
+                          <div className="h-14 flex flex-col justify-end px-3 pb-3 border-b border-slate-700">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-0.5">AFL</p>
+                            <p className="text-xs font-bold text-white leading-none">Now</p>
+                          </div>
+                          {aflTeams.map((team, i) => (
+                            <div key={i} className={`h-9 flex items-center px-3 border-b border-slate-800 ${i % 2 === 0 ? 'bg-slate-900' : 'bg-slate-800/60'}`}>
+                              <span className="text-xs font-semibold text-white truncate">{team}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* ── RIGHT: scrollable user columns ── */}
+                  <div className="overflow-x-auto flex-1">
+                    <div className="flex min-w-full">
+                      {spotlightPredictions.map((mp) => {
+                        const entry = (spotlightLeaderboard as LeaderboardEntry[]).find((l) => l.userId === mp.userId)
+                        const isMe = mp.userId === user?.id
+                        return (
+                          <div key={mp.userId} className="flex-[1_0_9rem] border-l border-slate-100">
+                            {/* Column header */}
+                            <div className={`h-14 flex flex-col justify-end px-3 pb-3 border-b border-slate-100 ${isMe ? 'bg-emerald-50' : 'bg-slate-50'}`}>
+                              <button
+                                onClick={() => navigate(`/ladder/${mp.userId}`)}
+                                className="text-xs font-bold text-slate-900 truncate text-left hover:text-emerald-700 transition-colors"
+                              >
+                                {mp.displayName}
+                              </button>
+                              <div className="flex items-center gap-1 mt-0.5">
+                                {isMe && <span className="text-[10px] font-semibold text-emerald-600">You</span>}
+                                {entry?.totalPoints != null && (
+                                  <span className="text-[10px] text-slate-400 font-semibold">
+                                    {isMe ? '· ' : ''}{entry.totalPoints} pts
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            {/* Ladder rows */}
+                            {mp.ladder.map((team, i) => {
+                              const pos = i + 1
+                              const aflIdx = aflTeams.length > 0 ? aflTeams.indexOf(team) : -1
+                              const aflActualPos = aflIdx >= 0 ? aflIdx + 1 : null
+                              const diff = aflActualPos !== null ? pos - aflActualPos : null
+                              // diff > 0 → team doing better than predicted (up ↑)
+                              // diff < 0 → team doing worse than predicted (down ↓)
+                              // diff = 0 → perfect match ✓
+                              const matchesAFL = diff === 0
+                              const zoneClass =
+                                pos <= 4  ? 'bg-emerald-50/60' :
+                                pos <= 8  ? 'bg-blue-50/40' :
+                                pos <= 14 ? 'bg-white' :
+                                            'bg-red-50/30'
+                              return (
+                                <div
+                                  key={i}
+                                  className={`h-9 flex items-center px-2 border-b border-slate-50 ${matchesAFL ? 'bg-emerald-100' : zoneClass}`}
+                                >
+                                  <span className={`text-xs font-semibold truncate flex-1 min-w-0 ${matchesAFL ? 'text-emerald-700 font-bold' : 'text-slate-700'}`}>
+                                    {team}
+                                  </span>
+                                  {diff === null ? null : diff === 0 ? (
+                                    <svg className="w-3 h-3 text-emerald-500 flex-shrink-0 ml-1" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                  ) : diff > 0 ? (
+                                    <span className="flex-shrink-0 ml-1 flex items-center gap-px text-emerald-600">
+                                      <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
+                                      </svg>
+                                      <span className="text-[9px] font-black leading-none">{diff}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="flex-shrink-0 ml-1 flex items-center gap-px text-red-500">
+                                      <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                      </svg>
+                                      <span className="text-[9px] font-black leading-none">{Math.abs(diff)}</span>
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

@@ -156,19 +156,25 @@ export class ScoreModel {
   }
 
   static async getGlobalLeaderboard(seasonId: number, limit: number = 100): Promise<any[]> {
-    // Use predictions directly so each user appears once regardless of how many
-    // competitions they've entered (scoring is per-ladder, not per-competition).
+    // Show all users who submitted a prediction — join scores if available.
+    // One row per user: users without scores appear at the bottom (NULLs last).
     const result = await db.query(
-      `SELECT u.id as "userId", u.display_name as "displayName", u.email,
-              p.total_score as "totalPoints",
+      `SELECT u.id as "userId", u.display_name as "displayName",
+              best.total_points as "totalPoints",
               (SELECT COUNT(*) FROM competition_members cm
                JOIN competitions c ON cm.competition_id = c.id
-               WHERE cm.user_id = u.id AND c.season_id = $1) as "competitionCount",
-              p.total_score as "avgPoints"
+               WHERE cm.user_id = u.id AND c.season_id = $1)::int as "competitionCount"
        FROM predictions p
        JOIN users u ON p.user_id = u.id
-       WHERE p.season_id = $1 AND p.total_score IS NOT NULL
-       ORDER BY p.total_score ASC
+       LEFT JOIN (
+         SELECT user_id, MIN(total_points) as total_points
+         FROM scores
+         WHERE season_id = $1
+         GROUP BY user_id
+       ) best ON best.user_id = u.id
+       WHERE p.season_id = $1
+         AND u.is_private = false
+       ORDER BY best.total_points ASC NULLS LAST, p.submitted_at ASC
        LIMIT $2`,
       [seasonId, limit]
     )

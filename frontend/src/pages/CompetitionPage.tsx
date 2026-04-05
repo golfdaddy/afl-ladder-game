@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
-import { COMPETITION_LOCKED } from '../config'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 interface LeaderboardEntry {
   userId: number
@@ -75,6 +75,7 @@ export default function CompetitionPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
+  const { seasonId, isLocked: competitionLocked } = useCurrentSeason()
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [inviteError, setInviteError] = useState('')
@@ -105,7 +106,18 @@ export default function CompetitionPage() {
       const response = await api.get(`/competitions/${id}/predictions`)
       return response.data.predictions as MemberPrediction[]
     },
-    enabled: COMPETITION_LOCKED,
+    enabled: competitionLocked,
+  })
+
+  // Fetch current AFL ladder for side-by-side comparison
+  const { data: aflLadderData } = useQuery({
+    queryKey: ['afl-ladder', seasonId],
+    queryFn: async () => {
+      const response = await api.get(`/admin/afl-ladder/${seasonId}`)
+      return response.data
+    },
+    enabled: competitionLocked && seasonId > 0,
+    retry: false,
   })
 
   // Send invite mutation
@@ -130,6 +142,15 @@ export default function CompetitionPage() {
   const pendingInvites: PendingInvite[] = compData?.pendingInvites || []
   const leaderboard: LeaderboardEntry[] = leaderboardData || []
   const memberPredictions: MemberPrediction[] = memberPredictionsData || []
+
+  // AFL current ladder — sorted by position ascending → array of team names
+  const aflTeams: string[] = (() => {
+    const teams = aflLadderData?.ladder?.teams
+    if (!Array.isArray(teams) || teams.length === 0) return []
+    return [...teams]
+      .sort((a: any, b: any) => a.position - b.position)
+      .map((t: any) => t.teamName)
+  })()
 
   const handleCopyCode = () => {
     if (competition) {
@@ -393,16 +414,16 @@ export default function CompetitionPage() {
                   <span className="text-sm font-semibold text-emerald-700">Prediction submitted ✓</span>
                 </div>
                 <p className="text-xs text-slate-400 mb-5">
-                  {COMPETITION_LOCKED ? 'Competition is locked — view only' : `Last updated: ${formatDate(me.predictionUpdatedAt)}`}
+                  {competitionLocked ? 'Competition is locked — view only' : `Last updated: ${formatDate(me.predictionUpdatedAt)}`}
                 </p>
                 <button
-                  onClick={() => navigate('/prediction/1')}
+                  onClick={() => navigate(`/prediction/${seasonId}`)}
                   className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors"
                 >
-                  {COMPETITION_LOCKED ? '👁 View My Ladder' : 'View / Edit Prediction'}
+                  {competitionLocked ? '👁 View My Ladder' : 'View / Edit Prediction'}
                 </button>
               </div>
-            ) : COMPETITION_LOCKED ? (
+            ) : competitionLocked ? (
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-2.5 h-2.5 bg-red-400 rounded-full" />
@@ -422,7 +443,7 @@ export default function CompetitionPage() {
                   Submit before the March 10 cutoff!
                 </p>
                 <button
-                  onClick={() => navigate('/prediction/1')}
+                  onClick={() => navigate(`/prediction/${seasonId}`)}
                   className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm transition-colors"
                 >
                   Submit My Prediction
@@ -569,7 +590,12 @@ export default function CompetitionPage() {
                   <RankBadge rank={index + 1} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-900 text-sm truncate">{entry.displayName}</span>
+                      <button
+                        onClick={() => navigate(`/ladder/${entry.userId}`)}
+                        className="font-semibold text-slate-900 text-sm truncate hover:text-emerald-700 hover:underline transition-colors text-left"
+                      >
+                        {entry.displayName}
+                      </button>
                       {entry.userId === currentUser?.id && (
                         <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>
                       )}
@@ -593,15 +619,23 @@ export default function CompetitionPage() {
         </div>
 
         {/* ── Member Ladders (revealed after lockout) ── */}
-        {COMPETITION_LOCKED && (
+        {competitionLocked && (
           <div className="mt-6 bg-white rounded-2xl border border-slate-200 overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-3">
               <div className="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center">
                 <span className="text-base">🔒</span>
               </div>
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Everyone's Ladder</h2>
-                <p className="text-sm text-slate-500 mt-0.5">All submissions revealed — competition is closed</p>
+                <h2 className="text-lg font-bold text-slate-900">League Ladders</h2>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  Side-by-side comparison · scroll right to see all
+                  {aflTeams.length > 0 && (
+                    <span className="ml-2 inline-flex items-center gap-1">
+                      <span className="w-2 h-2 bg-emerald-500 rounded-full inline-block" />
+                      <span className="text-emerald-600 font-medium">= matches AFL Now</span>
+                    </span>
+                  )}
+                </p>
               </div>
             </div>
 
@@ -610,44 +644,130 @@ export default function CompetitionPage() {
                 No submitted ladders found.
               </div>
             ) : (
-              <div className="divide-y divide-slate-100">
-                {memberPredictions.map((mp) => (
-                  <div key={mp.userId} className={`px-6 py-5 ${mp.userId === currentUser?.id ? 'bg-emerald-50/40' : ''}`}>
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center flex-shrink-0">
-                          <span className="text-xs font-bold text-slate-500">
-                            {mp.displayName.charAt(0).toUpperCase()}
-                          </span>
-                        </div>
-                        <span className="font-bold text-slate-900 text-sm">{mp.displayName}</span>
-                        {mp.userId === currentUser?.id && (
-                          <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">You</span>
-                        )}
+              /* Horizontal scroll: sticky left panel + scrollable user columns */
+              <div className="flex" style={{ minHeight: 0 }}>
+
+                {/* ── LEFT: sticky position # + AFL Now columns ── */}
+                <div
+                  className="flex-shrink-0 z-10 bg-white"
+                  style={{ boxShadow: '3px 0 8px -3px rgba(0,0,0,0.15)' }}
+                >
+                  <div className="flex">
+                    {/* Position number column */}
+                    <div className="w-10 flex flex-col">
+                      <div className="h-14 flex items-end pb-3 px-2 border-b border-slate-100 bg-white">
+                        <span className="text-xs font-bold text-slate-400">#</span>
                       </div>
-                      <span className="text-xs text-slate-400">
-                        Submitted {formatDate(mp.submittedAt)}
-                      </span>
-                    </div>
-                    {/* Ladder positions in a compact grid */}
-                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
-                      {mp.ladder.map((teamName, idx) => {
-                        const pos = idx + 1
-                        const badgeClass =
-                          pos <= 4 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
-                          pos <= 8 ? 'bg-blue-50 border-blue-200 text-blue-800' :
-                          pos <= 14 ? 'bg-slate-50 border-slate-200 text-slate-600' :
-                          'bg-red-50 border-red-200 text-red-700'
+                      {Array.from({ length: 18 }, (_, i) => {
+                        const pos = i + 1
+                        const zoneClass =
+                          pos <= 4  ? 'bg-emerald-50/80' :
+                          pos <= 8  ? 'bg-blue-50/50' :
+                          pos <= 14 ? 'bg-white' :
+                                      'bg-red-50/50'
                         return (
-                          <div key={pos} className={`flex items-center gap-1.5 border rounded-lg px-2 py-1 ${badgeClass}`}>
-                            <span className="text-xs font-black w-4 flex-shrink-0">{pos}</span>
-                            <span className="text-xs font-semibold truncate">{teamName.split(' ').pop()}</span>
+                          <div key={pos} className={`h-9 flex items-center justify-end pr-2 border-b border-slate-50 ${zoneClass}`}>
+                            <span className="text-xs font-black text-slate-400">{pos}</span>
                           </div>
                         )
                       })}
                     </div>
+
+                    {/* AFL Now column (dark bg) — only if data is available */}
+                    {aflTeams.length > 0 && (
+                      <div className="w-32 flex flex-col bg-slate-900">
+                        <div className="h-14 flex flex-col justify-end px-3 pb-3 border-b border-slate-700">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-0.5">AFL</p>
+                          <p className="text-xs font-bold text-white leading-none">Now</p>
+                        </div>
+                        {aflTeams.map((team, i) => (
+                          <div key={i} className={`h-9 flex items-center px-3 border-b border-slate-800 ${i % 2 === 0 ? 'bg-slate-900' : 'bg-slate-800/60'}`}>
+                            <span className="text-xs font-semibold text-white truncate">{team}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                ))}
+                </div>
+
+                {/* ── RIGHT: scrollable user columns ── */}
+                <div className="overflow-x-auto flex-1">
+                  <div className="flex min-w-full">
+                    {memberPredictions.map((mp) => {
+                      const entry = leaderboard.find(l => l.userId === mp.userId)
+                      const isMe = mp.userId === currentUser?.id
+                      return (
+                        <div key={mp.userId} className="flex-[1_0_9rem] border-l border-slate-100">
+                          {/* Column header */}
+                          <div className={`h-14 flex flex-col justify-end px-3 pb-3 border-b border-slate-100 ${isMe ? 'bg-emerald-50' : 'bg-slate-50'}`}>
+                            <button
+                              onClick={() => navigate(`/ladder/${mp.userId}`)}
+                              className="text-xs font-bold text-slate-900 truncate text-left hover:text-emerald-700 transition-colors"
+                            >
+                              {mp.displayName}
+                            </button>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              {isMe && (
+                                <span className="text-[10px] font-semibold text-emerald-600">You</span>
+                              )}
+                              {entry?.totalPoints != null && (
+                                <span className="text-[10px] text-slate-400 font-semibold">
+                                  {isMe ? '· ' : ''}{entry.totalPoints} pts
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Ladder rows */}
+                          {mp.ladder.map((team, i) => {
+                            const pos = i + 1
+                            const aflIdx = aflTeams.length > 0 ? aflTeams.indexOf(team) : -1
+                            const aflActualPos = aflIdx >= 0 ? aflIdx + 1 : null
+                            const diff = aflActualPos !== null ? pos - aflActualPos : null
+                            // diff > 0 → team doing better than predicted (up ↑)
+                            // diff < 0 → team doing worse than predicted (down ↓)
+                            // diff = 0 → perfect match ✓
+                            const matchesAFL = diff === 0
+                            const zoneClass =
+                              pos <= 4  ? 'bg-emerald-50/60' :
+                              pos <= 8  ? 'bg-blue-50/40' :
+                              pos <= 14 ? 'bg-white' :
+                                          'bg-red-50/30'
+                            return (
+                              <div
+                                key={i}
+                                className={`h-9 flex items-center px-2 border-b border-slate-50 ${matchesAFL ? 'bg-emerald-100' : zoneClass}`}
+                              >
+                                <span className={`text-xs font-semibold truncate flex-1 min-w-0 ${matchesAFL ? 'text-emerald-700 font-bold' : 'text-slate-700'}`}>
+                                  {team}
+                                </span>
+                                {diff === null ? null : diff === 0 ? (
+                                  <svg className="w-3 h-3 text-emerald-500 flex-shrink-0 ml-1" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                  </svg>
+                                ) : diff > 0 ? (
+                                  <span className="flex-shrink-0 ml-1 flex items-center gap-px text-emerald-600">
+                                    <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
+                                    </svg>
+                                    <span className="text-[9px] font-black leading-none">{diff}</span>
+                                  </span>
+                                ) : (
+                                  <span className="flex-shrink-0 ml-1 flex items-center gap-px text-red-500">
+                                    <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                    </svg>
+                                    <span className="text-[9px] font-black leading-none">{Math.abs(diff)}</span>
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
             )}
           </div>

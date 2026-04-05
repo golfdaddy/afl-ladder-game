@@ -111,15 +111,15 @@ CREATE TABLE IF NOT EXISTS point_details (
 );
 
 -- Create indexes for common queries
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_predictions_user_season ON predictions(user_id, season_id);
-CREATE INDEX idx_predictions_season ON predictions(season_id);
-CREATE INDEX idx_competitions_season ON competitions(season_id);
-CREATE INDEX idx_competition_members_user ON competition_members(user_id);
-CREATE INDEX idx_competition_members_competition ON competition_members(competition_id);
-CREATE INDEX idx_scores_competition ON scores(competition_id);
-CREATE INDEX idx_scores_user ON scores(user_id);
-CREATE INDEX idx_scores_season ON scores(season_id);
-CREATE INDEX idx_afl_ladder_snapshots_season ON afl_ladder_snapshots(season_id);
-CREATE INDEX idx_predicted_teams_prediction ON predicted_teams(prediction_id);
-CREATE INDEX idx_afl_ladder_teams_snapshot ON afl_ladder_teams(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_predictions_user_season ON predictions(user_id, season_id);
+CREATE INDEX IF NOT EXISTS idx_predictions_season ON predictions(season_id);
+CREATE INDEX IF NOT EXISTS idx_competitions_season ON competitions(season_id);
+CREATE INDEX IF NOT EXISTS idx_competition_members_user ON competition_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_competition_members_competition ON competition_members(competition_id);
+CREATE INDEX IF NOT EXISTS idx_scores_competition ON scores(competition_id);
+CREATE INDEX IF NOT EXISTS idx_scores_user ON scores(user_id);
+CREATE INDEX IF NOT EXISTS idx_scores_season ON scores(season_id);
+CREATE INDEX IF NOT EXISTS idx_afl_ladder_snapshots_season ON afl_ladder_snapshots(season_id);
+CREATE INDEX IF NOT EXISTS idx_predicted_teams_prediction ON predicted_teams(prediction_id);
+CREATE INDEX IF NOT EXISTS idx_afl_ladder_teams_snapshot ON afl_ladder_teams(snapshot_id);
