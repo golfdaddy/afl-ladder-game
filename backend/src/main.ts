@@ -64,15 +64,10 @@ db.connect()
 
     // Schedule automatic AFL ladder sync from Squiggle in Melbourne time (production only)
     if (process.env.NODE_ENV === 'production') {
-      cron.schedule('0 * * * 6,0', () => {
+      cron.schedule('0 13-23,0 * * *', () => {
         syncLadderFromSquiggle();
       }, { timezone: APP_TIMEZONE });
-      console.log(`[LadderSync] Scheduled: hourly on weekends in ${APP_TIMEZONE}`);
-
-      cron.schedule('0 22 * * 1-5', () => {
-        syncLadderFromSquiggle();
-      }, { timezone: APP_TIMEZONE });
-      console.log(`[LadderSync] Scheduled: weekdays at 10:00 PM in ${APP_TIMEZONE}`);
+      console.log(`[LadderSync] Scheduled: hourly 1pm–midnight every day in ${APP_TIMEZONE}`);
 
       cron.schedule('*/30 * * * *', () => {
         runFantasySyncJobs()
