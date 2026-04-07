@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Score — Competition Preview</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-50">
+
+  <!-- Dark header -->
+  <div class="bg-slate-900">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 pt-6 pb-8">
+      <div class="flex justify-between items-start">
+        <div class="flex items-start gap-3">
+          <div class="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-800 text-slate-400 mt-0.5 flex-shrink-0">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+            </svg>
+          </div>
+          <div>
+            <p class="text-slate-500 text-xs font-semibold uppercase tracking-widest mb-1">Competition</p>
+            <h1 class="text-2xl font-black text-white">The Buoys League</h1>
+            <p class="mt-1 text-slate-400 text-sm">Season 2026</p>
+          </div>
+        </div>
+        <span class="px-3 py-1 rounded-full text-xs font-semibold bg-slate-700 text-slate-400">Private</span>
+      </div>
+      <div class="mt-6 flex gap-6">
+        <div>
+          <p class="text-2xl font-black text-white">8</p>
+          <p class="text-slate-500 text-xs mt-0.5">Members</p>
+        </div>
+        <div class="w-px bg-slate-800"></div>
+        <div>
+          <p class="text-2xl font-black text-emerald-400">7</p>
+          <p class="text-slate-500 text-xs mt-0.5">Submitted</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <main class="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+
+    <!-- My Score Card -->
+    <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+      <!-- Header + tab switcher -->
+      <div class="px-6 py-5 border-b border-slate-100 flex items-center gap-3">
+        <div class="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
+          <span class="text-base">&#128274;</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <h2 class="text-lg font-bold text-slate-900" id="sectionTitle">My Score</h2>
+          <p class="text-sm text-slate-500 mt-0.5" id="sectionSubtitle">AFL ladder vs your prediction — lower is better</p>
+        </div>
+        <div class="flex-shrink-0 flex rounded-xl bg-slate-100 p-1 gap-1">
+          <button onclick="showTab('score')" id="tabScore" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors bg-white text-slate-900 shadow-sm">
+            My Score
+          </button>
+          <button onclick="showTab('spotlight')" id="tabSpotlight" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-slate-500 hover:text-slate-700">
+            Team Spotlight
+          </button>
+        </div>
+      </div>
+
+      <!-- ===== MY SCORE VIEW ===== -->
+      <div id="scoreView">
+        <!-- Score summary banner -->
+        <div class="px-5 py-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-4">
+          <div>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Your score</p>
+            <div class="flex items-baseline gap-2 mt-0.5">
+              <span class="text-3xl font-black text-slate-900" id="totalScore"></span>
+              <span class="text-sm text-slate-400 font-medium">points</span>
+              <span class="text-xs text-slate-400" id="rankLabel"></span>
+            </div>
+          </div>
+          <div class="flex gap-4">
+            <div class="text-center">
+              <p class="text-lg font-black text-emerald-600" id="perfectCount"></p>
+              <p class="text-xs text-slate-400">perfect</p>
+            </div>
+            <div class="text-center">
+              <p class="text-lg font-black text-emerald-600" id="overCount"></p>
+              <p class="text-xs text-slate-400">&uarr; over</p>
+            </div>
+            <div class="text-center">
+              <p class="text-lg font-black text-red-500" id="underCount"></p>
+              <p class="text-xs text-slate-400">&darr; under</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Zone legend -->
+        <div class="px-5 py-2.5 border-b border-slate-100 flex gap-4 flex-wrap" id="zoneLegend"></div>
+
+        <!-- Column headers -->
+        <div class="grid grid-cols-[2.5rem_1fr_2.5rem_3rem_2.5rem] items-center px-4 py-2.5 bg-slate-900 text-slate-400 text-xs font-semibold uppercase tracking-widest">
+          <div class="text-center">AFL</div>
+          <div class="pl-2">Team</div>
+          <div class="text-center">My</div>
+          <div class="text-center">Move</div>
+          <div class="text-center">Pts</div>
+        </div>
+
+        <!-- Team rows -->
+        <div class="divide-y divide-slate-50" id="scoreRows"></div>
+
+        <!-- Footer key -->
+        <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-5 text-xs text-slate-400">
+          <span class="flex items-center gap-1">
+            <svg class="w-3 h-3 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7" />
+            </svg>
+            Predicted higher than actual
+          </span>
+          <span class="flex items-center gap-1">
+            <svg class="w-3 h-3 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7 7" />
+            </svg>
+            Predicted lower than actual
+          </span>
+        </div>
+      </div>
+
+      <!-- ===== TEAM SPOTLIGHT VIEW (hidden by default) ===== -->
+      <div id="spotlightView" class="hidden">
+        <div class="px-6 py-4 border-b border-slate-100">
+          <div class="flex flex-wrap gap-2" id="teamPicker"></div>
+        </div>
+        <div id="spotlightContent"></div>
+      </div>
+    </div>
+
+  </main>
+
+<script>
+// ── AFL Team Data ──
+const AFL_TEAMS = [
+  { name: 'Melbourne',        shortName: 'MEL', primaryColor: '#041E42', secondaryColor: '#CC2031', textColor: '#FFFFFF' },
+  { name: 'St Kilda',         shortName: 'STK', primaryColor: '#000000', secondaryColor: '#ED1C24', textColor: '#FFFFFF' },
+  { name: 'Collingwood',      shortName: 'COL', primaryColor: '#000000', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'Brisbane Lions',   shortName: 'BRL', primaryColor: '#69003B', secondaryColor: '#0055A3', textColor: '#FFFFFF' },
+  { name: 'Port Adelaide',    shortName: 'PTA', primaryColor: '#008AAB', secondaryColor: '#000000', textColor: '#FFFFFF' },
+  { name: 'Carlton',          shortName: 'CAR', primaryColor: '#001B2A', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'North Melbourne',  shortName: 'NTH', primaryColor: '#003C71', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'GWS Giants',       shortName: 'GWS', primaryColor: '#F15C22', secondaryColor: '#4A4F55', textColor: '#FFFFFF' },
+  { name: 'Richmond',         shortName: 'RIC', primaryColor: '#000000', secondaryColor: '#FED102', textColor: '#FED102' },
+  { name: 'Fremantle',        shortName: 'FRE', primaryColor: '#2E0854', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'Essendon',         shortName: 'ESS', primaryColor: '#000000', secondaryColor: '#CC2031', textColor: '#CC2031' },
+  { name: 'Adelaide Crows',   shortName: 'ADE', primaryColor: '#002654', secondaryColor: '#E21E31', textColor: '#FFD200' },
+  { name: 'Gold Coast Suns',  shortName: 'GCS', primaryColor: '#CF2032', secondaryColor: '#F4B223', textColor: '#FFFFFF' },
+  { name: 'Geelong',          shortName: 'GEE', primaryColor: '#001F3D', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'Hawthorn',         shortName: 'HAW', primaryColor: '#4D2004', secondaryColor: '#FBBF15', textColor: '#FBBF15' },
+  { name: 'Sydney Swans',     shortName: 'SYD', primaryColor: '#ED171F', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'West Coast Eagles',shortName: 'WCE', primaryColor: '#002B5C', secondaryColor: '#F2A900', textColor: '#F2A900' },
+  { name: 'Western Bulldogs', shortName: 'WBD', primaryColor: '#014896', secondaryColor: '#E1251B', textColor: '#FFFFFF' },
+];
+
+const getTeamMeta = (name) => AFL_TEAMS.find(t => t.name === name) || {
+  name, shortName: name.slice(0,3).toUpperCase(), primaryColor: '#334155', secondaryColor: '#fff', textColor: '#fff'
+};
+
+// ── Mock AFL Ladder (actual current positions) ──
+const aflLadder = [
+  'Geelong', 'Sydney Swans', 'Brisbane Lions', 'Carlton',
+  'Collingwood', 'Port Adelaide', 'Western Bulldogs', 'Hawthorn',
+  'Fremantle', 'GWS Giants', 'Melbourne', 'Essendon',
+  'Adelaide Crows', 'St Kilda', 'Richmond', 'Gold Coast Suns',
+  'North Melbourne', 'West Coast Eagles'
+];
+
+// ── Mock User Prediction (your predicted order) ──
+const myPrediction = [
+  'Carlton', 'Brisbane Lions', 'Geelong', 'Collingwood',
+  'Sydney Swans', 'Melbourne', 'Port Adelaide', 'Fremantle',
+  'Hawthorn', 'Western Bulldogs', 'Essendon', 'GWS Giants',
+  'Richmond', 'St Kilda', 'Adelaide Crows', 'Gold Coast Suns',
+  'North Melbourne', 'West Coast Eagles'
+];
+
+// ── Mock Spotlight Data (all members' predictions for a team) ──
+const mockMembers = [
+  { name: 'Matt', userId: 1, ladder: myPrediction },
+  { name: 'Davo', userId: 2, ladder: ['Geelong','Carlton','Sydney Swans','Brisbane Lions','Collingwood','Hawthorn','Port Adelaide','Melbourne','Fremantle','Western Bulldogs','Essendon','GWS Giants','Adelaide Crows','Richmond','St Kilda','Gold Coast Suns','North Melbourne','West Coast Eagles'] },
+  { name: 'Simmo', userId: 3, ladder: ['Sydney Swans','Geelong','Collingwood','Carlton','Brisbane Lions','Western Bulldogs','Hawthorn','Port Adelaide','Melbourne','Fremantle','GWS Giants','Essendon','St Kilda','Adelaide Crows','Richmond','North Melbourne','Gold Coast Suns','West Coast Eagles'] },
+  { name: 'Bazza', userId: 4, ladder: ['Brisbane Lions','Geelong','Carlton','Sydney Swans','Port Adelaide','Collingwood','Fremantle','Hawthorn','Melbourne','Western Bulldogs','GWS Giants','Essendon','Adelaide Crows','St Kilda','Gold Coast Suns','Richmond','West Coast Eagles','North Melbourne'] },
+];
+
+// ── Zones ──
+const zones = [
+  { label: 'Top 4',  positions: '1\u20134',  range: [0,3],   text: 'text-emerald-600', dot: 'bg-emerald-500' },
+  { label: 'Finals', positions: '5\u201310', range: [4,9],   text: 'text-blue-600',    dot: 'bg-blue-500' },
+  { label: 'Mid',    positions: '11\u201314',range: [10,13],  text: 'text-slate-500',   dot: 'bg-slate-400' },
+  { label: 'Bottom', positions: '15\u201318',range: [14,17],  text: 'text-red-500',     dot: 'bg-red-500' },
+];
+const getZone = (i) => zones.find(z => i >= z.range[0] && i <= z.range[1]);
+
+function posBadgeClass(i) {
+  if (i < 4) return 'bg-emerald-500 text-white';
+  if (i < 10) return 'bg-blue-100 text-blue-700';
+  if (i < 14) return 'bg-slate-100 text-slate-600';
+  return 'bg-red-100 text-red-600';
+}
+
+// ── Compute score rows ──
+const scoreRows = aflLadder.map((teamName, i) => {
+  const actualPos = i + 1;
+  const predIdx = myPrediction.indexOf(teamName);
+  const predictedPos = predIdx >= 0 ? predIdx + 1 : null;
+  const diff = predictedPos !== null ? predictedPos - actualPos : null;
+  const points = diff !== null ? Math.abs(diff) : null;
+  return { teamName, actualPos, predictedPos, diff, points };
+});
+
+const totalScore = scoreRows.reduce((s, r) => s + (r.points || 0), 0);
+
+// ── Render zone legend ──
+document.getElementById('zoneLegend').innerHTML = zones.map(z => `
+  <div class="flex items-center gap-1.5">
+    <span class="w-2 h-2 rounded-full flex-shrink-0 ${z.dot}"></span>
+    <span class="text-xs font-semibold ${z.text}">${z.label}</span>
+    <span class="text-xs text-slate-400">${z.positions}</span>
+  </div>
+`).join('');
+
+// ── Render summary ──
+document.getElementById('totalScore').textContent = totalScore;
+document.getElementById('rankLabel').textContent = '· Rank #3 of 8';
+document.getElementById('perfectCount').textContent = scoreRows.filter(r => r.diff === 0).length;
+document.getElementById('overCount').textContent = scoreRows.filter(r => r.diff !== null && r.diff < 0).length;
+document.getElementById('underCount').textContent = scoreRows.filter(r => r.diff !== null && r.diff > 0).length;
+
+// ── Render score rows ──
+function diffBadgeHTML(diff, points) {
+  if (diff === null || points === null) return '<span class="text-xs text-slate-300 font-mono w-12 text-center">&mdash;</span>';
+  if (diff === 0) return '<span class="inline-flex items-center justify-center w-12 text-xs font-bold text-emerald-600">&#10003; 0</span>';
+  if (diff < 0) return `<span class="inline-flex items-center justify-center gap-0.5 w-12 text-xs font-bold text-emerald-600">
+    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7" /></svg>${Math.abs(diff)}</span>`;
+  return `<span class="inline-flex items-center justify-center gap-0.5 w-12 text-xs font-bold text-red-500">
+    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" /></svg>${Math.abs(diff)}</span>`;
+}
+
+document.getElementById('scoreRows').innerHTML = scoreRows.map(row => {
+  const meta = getTeamMeta(row.teamName);
+  const zone = getZone(row.actualPos - 1);
+  const pts = row.points;
+  const ptsColor = pts === 0 ? 'text-emerald-500' : pts <= 2 ? 'text-emerald-600' : pts <= 4 ? 'text-amber-500' : 'text-red-500';
+  const borderStyle = meta.primaryColor === '#000000' ? 'border: 1px solid #333' : 'border: none';
+
+  return `<div class="grid grid-cols-[2.5rem_1fr_2.5rem_3rem_2.5rem] items-center px-4 py-2.5 ${pts === 0 ? 'bg-emerald-50/40' : ''}">
+    <div class="flex justify-center">
+      <span class="inline-flex items-center justify-center w-6 h-6 rounded-lg text-xs font-black ${posBadgeClass(row.actualPos - 1)}">${row.actualPos}</span>
+    </div>
+    <div class="flex items-center gap-2.5 pl-2 min-w-0">
+      <div class="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shadow-sm flex-shrink-0"
+           style="background-color:${meta.primaryColor};color:${meta.textColor};${borderStyle}">
+        ${meta.shortName}
+      </div>
+      <div class="min-w-0">
+        <p class="font-semibold text-slate-900 text-sm leading-tight truncate">${row.teamName}</p>
+        <p class="text-xs ${zone.text}">${zone.label}</p>
+      </div>
+    </div>
+    <div class="flex justify-center">
+      ${row.predictedPos !== null
+        ? `<span class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-black ${posBadgeClass(row.predictedPos - 1)}">${row.predictedPos}</span>`
+        : '<span class="w-7 text-center text-xs text-slate-300">&mdash;</span>'}
+    </div>
+    <div class="flex justify-center">${diffBadgeHTML(row.diff, pts)}</div>
+    <div class="flex justify-center">
+      <span class="text-sm font-black ${ptsColor}">${pts !== null ? pts : '&mdash;'}</span>
+    </div>
+  </div>`;
+}).join('');
+
+// ── Tab switching ──
+let selectedTeam = '';
+
+function showTab(tab) {
+  const scoreView = document.getElementById('scoreView');
+  const spotlightView = document.getElementById('spotlightView');
+  const tabScore = document.getElementById('tabScore');
+  const tabSpotlight = document.getElementById('tabSpotlight');
+  const title = document.getElementById('sectionTitle');
+  const subtitle = document.getElementById('sectionSubtitle');
+
+  if (tab === 'score') {
+    scoreView.classList.remove('hidden');
+    spotlightView.classList.add('hidden');
+    tabScore.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors bg-white text-slate-900 shadow-sm';
+    tabSpotlight.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-slate-500 hover:text-slate-700';
+    title.textContent = 'My Score';
+    subtitle.textContent = 'AFL ladder vs your prediction \u2014 lower is better';
+  } else {
+    scoreView.classList.add('hidden');
+    spotlightView.classList.remove('hidden');
+    tabScore.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-slate-500 hover:text-slate-700';
+    tabSpotlight.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors bg-white text-slate-900 shadow-sm';
+    title.textContent = 'Team Spotlight';
+    subtitle.textContent = 'Select a team to see where everyone placed them';
+    if (!selectedTeam) selectTeam(aflLadder[0]);
+  }
+}
+
+// ── Team Spotlight ──
+function renderTeamPicker() {
+  document.getElementById('teamPicker').innerHTML = aflLadder.map(team => {
+    const meta = getTeamMeta(team);
+    const isSelected = selectedTeam === team;
+    const style = isSelected
+      ? `background-color:${meta.primaryColor};color:${meta.textColor};${meta.primaryColor === '#000000' ? 'border:1px solid #333' : `border:1px solid ${meta.primaryColor}`}`
+      : 'background-color:#f1f5f9;color:#475569;border:1px solid transparent';
+    return `<button onclick="selectTeam('${team}')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition-colors" style="${style}">${meta.shortName}</button>`;
+  }).join('');
+}
+
+function selectTeam(team) {
+  selectedTeam = team;
+  renderTeamPicker();
+  renderSpotlight();
+}
+
+function renderSpotlight() {
+  if (!selectedTeam) return;
+  const meta = getTeamMeta(selectedTeam);
+  const actualPos = aflLadder.indexOf(selectedTeam) + 1;
+
+  const rows = mockMembers.map(m => {
+    const predPos = m.ladder.indexOf(selectedTeam) + 1;
+    const error = Math.abs(predPos - actualPos);
+    return { ...m, predPos, actualPos, error };
+  }).sort((a, b) => a.predPos - b.predPos);
+
+  const borderStyle = meta.primaryColor === '#000000' ? 'border: 1px solid #333' : 'border: none';
+
+  let html = `
+    <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3" style="background-color:${meta.primaryColor}10">
+      <div class="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black shadow-sm flex-shrink-0"
+           style="background-color:${meta.primaryColor};color:${meta.textColor};${borderStyle}">${meta.shortName}</div>
+      <div>
+        <p class="font-bold text-slate-900">${selectedTeam}</p>
+        <p class="text-xs text-slate-500">Currently #${actualPos} on the AFL ladder</p>
+      </div>
+    </div>
+    <div class="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-6 py-2 bg-slate-50 border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
+      <span>Member</span>
+      <span class="text-right w-20">Predicted</span>
+      <span class="text-right w-16">Actual</span>
+      <span class="text-right w-12">Diff</span>
+    </div>`;
+
+  rows.forEach(row => {
+    const isMe = row.userId === 1;
+    const diffColor = row.error === 0 ? 'text-emerald-600 bg-emerald-50' :
+      row.error <= 2 ? 'text-amber-600 bg-amber-50' :
+      row.error <= 5 ? 'text-orange-600 bg-orange-50' : 'text-red-600 bg-red-50';
+
+    html += `<div class="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-6 py-3 border-b border-slate-50 items-center ${isMe ? 'bg-emerald-50/60' : 'hover:bg-slate-50'}">
+      <div class="flex items-center gap-2 min-w-0">
+        <div class="min-w-0">
+          <span class="text-sm font-semibold text-slate-900">${row.name}</span>
+          ${isMe ? '<span class="ml-2 text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">You</span>' : ''}
+        </div>
+      </div>
+      <div class="text-right w-20"><span class="text-lg font-black text-slate-900">#${row.predPos}</span></div>
+      <div class="text-right w-16"><span class="text-sm font-semibold text-slate-500">#${row.actualPos}</span></div>
+      <div class="text-right w-12">
+        <span class="inline-flex items-center justify-center w-8 h-8 rounded-xl text-xs font-black ${diffColor}">
+          ${row.error === 0 ? '&#10003;' : `&plusmn;${row.error}`}
+        </span>
+      </div>
+    </div>`;
+  });
+
+  html += `<div class="px-6 py-3 bg-slate-50 text-xs text-slate-400 text-center">
+    Predicted position vs current AFL standing &middot; &#10003; = exact match
+  </div>`;
+
+  document.getElementById('spotlightContent').innerHTML = html;
+}
+
+renderTeamPicker();
+</script>
+</body>
+</html>
