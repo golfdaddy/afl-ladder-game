@@ -6,6 +6,7 @@ const SQUIGGLE_BASE = 'https://api.squiggle.com.au'
 const SQUIGGLE_TO_INTERNAL: Record<string, string> = {
   'Adelaide':          'Adelaide Crows',
   'Brisbane':          'Brisbane Lions',
+  'Brisbane Lions':    'Brisbane Lions',
   'Carlton':           'Carlton',
   'Collingwood':       'Collingwood',
   'Essendon':          'Essendon',
