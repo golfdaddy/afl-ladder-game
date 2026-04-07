@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
@@ -80,6 +80,8 @@ export default function CompetitionPage() {
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [inviteError, setInviteError] = useState('')
   const [copySuccess, setCopySuccess] = useState(false)
+  const [ladderView, setLadderView] = useState<'ladder' | 'spotlight'>('ladder')
+  const [selectedTeam, setSelectedTeam] = useState<string>('')
 
   // Fetch competition details
   const { data: compData, isLoading: compLoading } = useQuery({
@@ -151,6 +153,42 @@ export default function CompetitionPage() {
       .sort((a: any, b: any) => a.position - b.position)
       .map((t: any) => t.teamName)
   })()
+
+  // Auto-select the team with the highest positional variance when data loads
+  useEffect(() => {
+    if (aflTeams.length === 0 || memberPredictions.length === 0 || selectedTeam) return
+    let highestVariance = -1
+    let bestTeam = aflTeams[0]
+    for (const team of aflTeams) {
+      const positions = memberPredictions.map(mp => mp.ladder.indexOf(team) + 1)
+      const mean = positions.reduce((a, b) => a + b, 0) / positions.length
+      const variance = positions.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / positions.length
+      if (variance > highestVariance) { highestVariance = variance; bestTeam = team }
+    }
+    setSelectedTeam(bestTeam)
+  }, [aflTeams, memberPredictions, selectedTeam])
+
+  // Per-team spotlight: each member's predicted vs actual position
+  const spotlightRows = useMemo(() => {
+    if (!selectedTeam || aflTeams.length === 0 || memberPredictions.length === 0) return []
+    const actualPos = aflTeams.indexOf(selectedTeam) + 1
+    return memberPredictions
+      .map(mp => {
+        const predictedPos = mp.ladder.indexOf(selectedTeam) + 1
+        const error = Math.abs(predictedPos - actualPos)
+        const lbIdx = leaderboard.findIndex(l => l.userId === mp.userId)
+        return {
+          userId: mp.userId,
+          displayName: mp.displayName,
+          predictedPos,
+          actualPos,
+          error,
+          leaderboardRank: lbIdx >= 0 ? lbIdx + 1 : null,
+          totalPoints: leaderboard[lbIdx]?.totalPoints,
+        }
+      })
+      .sort((a, b) => a.predictedPos - b.predictedPos)
+  }, [selectedTeam, aflTeams, memberPredictions, leaderboard])
 
   const handleCopyCode = () => {
     if (competition) {
@@ -621,25 +659,141 @@ export default function CompetitionPage() {
         {/* ── Member Ladders (revealed after lockout) ── */}
         {competitionLocked && (
           <div className="mt-6 bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            {/* Header + tab switcher */}
             <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-3">
-              <div className="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center">
+              <div className="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
                 <span className="text-base">🔒</span>
               </div>
-              <div>
+              <div className="flex-1 min-w-0">
                 <h2 className="text-lg font-bold text-slate-900">League Ladders</h2>
-                <p className="text-sm text-slate-500 mt-0.5">
-                  Side-by-side comparison · scroll right to see all
-                  {aflTeams.length > 0 && (
+                {ladderView === 'ladder' && aflTeams.length > 0 && (
+                  <p className="text-sm text-slate-500 mt-0.5">
+                    Side-by-side comparison · scroll right to see all
                     <span className="ml-2 inline-flex items-center gap-1">
                       <span className="w-2 h-2 bg-emerald-500 rounded-full inline-block" />
                       <span className="text-emerald-600 font-medium">= matches AFL Now</span>
                     </span>
-                  )}
-                </p>
+                  </p>
+                )}
+                {ladderView === 'spotlight' && (
+                  <p className="text-sm text-slate-500 mt-0.5">Select a team to see where everyone placed them</p>
+                )}
+              </div>
+              {/* View toggle */}
+              <div className="flex-shrink-0 flex rounded-xl bg-slate-100 p-1 gap-1">
+                <button
+                  onClick={() => setLadderView('ladder')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${ladderView === 'ladder' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  Ladder
+                </button>
+                <button
+                  onClick={() => setLadderView('spotlight')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${ladderView === 'spotlight' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  Team Spotlight
+                </button>
               </div>
             </div>
 
-            {memberPredictions.length === 0 ? (
+            {/* ── Team Spotlight view ── */}
+            {ladderView === 'spotlight' && (
+              <div>
+                {/* Team picker */}
+                <div className="px-6 py-4 border-b border-slate-100">
+                  <div className="flex flex-wrap gap-2">
+                    {aflTeams.map(team => (
+                      <button
+                        key={team}
+                        onClick={() => setSelectedTeam(team)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                          selectedTeam === team
+                            ? 'bg-slate-900 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {team}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Spotlight table */}
+                {selectedTeam && spotlightRows.length > 0 ? (
+                  <div>
+                    {/* Table header */}
+                    <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-6 py-2 bg-slate-50 border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      <span>Member</span>
+                      <span className="text-right w-20">Predicted</span>
+                      <span className="text-right w-16">Actual</span>
+                      <span className="text-right w-12">Diff</span>
+                    </div>
+                    {spotlightRows.map(row => {
+                      const isMe = row.userId === currentUser?.id
+                      const diffColor =
+                        row.error === 0 ? 'text-emerald-600 bg-emerald-50' :
+                        row.error <= 2 ? 'text-amber-600 bg-amber-50' :
+                        row.error <= 5 ? 'text-orange-600 bg-orange-50' :
+                        'text-red-600 bg-red-50'
+                      return (
+                        <div
+                          key={row.userId}
+                          className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-6 py-3 border-b border-slate-50 items-center ${isMe ? 'bg-emerald-50/60' : 'hover:bg-slate-50'}`}
+                        >
+                          {/* Member name + rank */}
+                          <div className="flex items-center gap-2 min-w-0">
+                            {row.leaderboardRank != null && (
+                              <RankBadge rank={row.leaderboardRank} />
+                            )}
+                            <div className="min-w-0">
+                              <button
+                                onClick={() => navigate(`/ladder/${row.userId}`)}
+                                className="text-sm font-semibold text-slate-900 hover:text-emerald-700 truncate transition-colors text-left block"
+                              >
+                                {row.displayName}
+                              </button>
+                              {row.totalPoints != null && (
+                                <span className="text-xs text-slate-400">{row.totalPoints} pts total</span>
+                              )}
+                            </div>
+                            {isMe && (
+                              <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>
+                            )}
+                          </div>
+
+                          {/* Predicted position */}
+                          <div className="text-right w-20">
+                            <span className="text-lg font-black text-slate-900">#{row.predictedPos}</span>
+                          </div>
+
+                          {/* Actual position */}
+                          <div className="text-right w-16">
+                            <span className="text-sm font-semibold text-slate-500">#{row.actualPos}</span>
+                          </div>
+
+                          {/* Diff badge */}
+                          <div className="text-right w-12">
+                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-xl text-xs font-black ${diffColor}`}>
+                              {row.error === 0 ? '✓' : `±${row.error}`}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    <div className="px-6 py-3 bg-slate-50 text-xs text-slate-400 text-center">
+                      Predicted position vs current AFL standing · ✓ = exact match
+                    </div>
+                  </div>
+                ) : (
+                  <div className="px-6 py-12 text-center text-slate-400 text-sm">
+                    {aflTeams.length === 0 ? 'AFL ladder data not yet available.' : 'Select a team above.'}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Ladder view ── */}
+            {ladderView === 'ladder' && (memberPredictions.length === 0 ? (
               <div className="px-6 py-12 text-center text-slate-400 text-sm">
                 No submitted ladders found.
               </div>
@@ -769,7 +923,7 @@ export default function CompetitionPage() {
                   </div>
                 </div>
               </div>
-            )}
+            ))}
           </div>
         )}
       </main>
