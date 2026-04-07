@@ -102,6 +102,34 @@ function posBadgeClass(i: number) {
   return 'bg-red-100 text-red-600'
 }
 
+function ptsColorClass(pts: number | null) {
+  if (pts === 0) return 'text-emerald-500'
+  if (pts !== null && pts <= 2) return 'text-emerald-600'
+  if (pts !== null && pts <= 4) return 'text-amber-500'
+  return 'text-red-500'
+}
+
+function classifyTeam(teamName: string, memberPredictions: MemberPrediction[]) {
+  const positions = memberPredictions.map(m => m.ladder.indexOf(teamName) + 1)
+  const allSame = positions.every(p => p === positions[0])
+  const spread = Math.max(...positions) - Math.min(...positions)
+  const isKeyTeam = spread >= 3
+  return { allSame, isKeyTeam, spread }
+}
+
+function getScoreForMember(member: MemberPrediction, teamName: string, aflTeams: string[]) {
+  const actualPos = aflTeams.indexOf(teamName) + 1
+  const predIdx = member.ladder.indexOf(teamName)
+  const predictedPos = predIdx >= 0 ? predIdx + 1 : null
+  const diff = predictedPos !== null ? predictedPos - actualPos : null
+  const points = diff !== null ? Math.abs(diff) : null
+  return { predictedPos, diff, points }
+}
+
+function totalForMember(member: MemberPrediction, aflTeams: string[]) {
+  return aflTeams.reduce((sum, team) => sum + (getScoreForMember(member, team, aflTeams).points || 0), 0)
+}
+
 function ScoreDiffBadge({ diff, points }: { diff: number | null; points: number | null }) {
   if (diff === null || points === null) {
     return <span className="text-xs text-slate-300 font-mono w-12 text-center">—</span>
@@ -166,7 +194,7 @@ export default function CompetitionPage() {
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [inviteError, setInviteError] = useState('')
   const [copySuccess, setCopySuccess] = useState(false)
-  const [ladderView, setLadderView] = useState<'ladder' | 'spotlight'>('ladder')
+  const [ladderView, setLadderView] = useState<'ladder' | 'spotlight' | 'compare'>('compare')
   const [selectedTeam, setSelectedTeam] = useState<string>('')
 
   // Fetch competition details
@@ -303,6 +331,16 @@ export default function CompetitionPage() {
     const idx = leaderboard.findIndex(l => l.userId === currentUser.id)
     return idx >= 0 ? idx + 1 : null
   }, [leaderboard, currentUser])
+
+  // Sorted members for league compare: current user first, then by total score
+  const sortedPredictions = useMemo(() => {
+    if (aflTeams.length === 0 || memberPredictions.length === 0) return []
+    return [...memberPredictions].sort((a, b) => {
+      if (a.userId === currentUser?.id) return -1
+      if (b.userId === currentUser?.id) return 1
+      return totalForMember(a, aflTeams) - totalForMember(b, aflTeams)
+    })
+  }, [memberPredictions, aflTeams, currentUser])
 
   const handleCopyCode = () => {
     if (competition) {
@@ -770,7 +808,7 @@ export default function CompetitionPage() {
           </div>
         </div>
 
-        {/* ── My Score vs AFL Ladder (revealed after lockout) ── */}
+        {/* ── Ladders section (revealed after lockout) ── */}
         {competitionLocked && (
           <div className="mt-6 bg-white rounded-2xl border border-slate-200 overflow-hidden">
             {/* Header + tab switcher */}
@@ -780,17 +818,22 @@ export default function CompetitionPage() {
               </div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-lg font-bold text-slate-900">
-                  {ladderView === 'ladder' ? 'My Score' : 'Team Spotlight'}
+                  {ladderView === 'compare' ? 'League Compare' : ladderView === 'ladder' ? 'My Score' : 'Team Spotlight'}
                 </h2>
-                {ladderView === 'ladder' && (
-                  <p className="text-sm text-slate-500 mt-0.5">AFL ladder vs your prediction — lower is better</p>
-                )}
-                {ladderView === 'spotlight' && (
-                  <p className="text-sm text-slate-500 mt-0.5">Select a team to see where everyone placed them</p>
-                )}
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {ladderView === 'compare' && 'AFL ladder vs everyone\u2019s predictions — tap a team for detail'}
+                  {ladderView === 'ladder' && 'AFL ladder vs your prediction — lower is better'}
+                  {ladderView === 'spotlight' && 'Select a team to see where everyone placed them'}
+                </p>
               </div>
               {/* View toggle */}
               <div className="flex-shrink-0 flex rounded-xl bg-slate-100 p-1 gap-1">
+                <button
+                  onClick={() => setLadderView('compare')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${ladderView === 'compare' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  League Compare
+                </button>
                 <button
                   onClick={() => setLadderView('ladder')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${ladderView === 'ladder' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
@@ -805,6 +848,161 @@ export default function CompetitionPage() {
                 </button>
               </div>
             </div>
+
+            {/* ── League Compare view ── */}
+            {ladderView === 'compare' && (
+              <div>
+                {aflTeams.length === 0 || sortedPredictions.length === 0 ? (
+                  <div className="px-6 py-12 text-center text-slate-400 text-sm">
+                    {aflTeams.length === 0 ? 'AFL ladder data not yet available.' : 'No predictions submitted yet.'}
+                  </div>
+                ) : (
+                  <>
+                    {/* Zone + key legend */}
+                    <div className="px-5 py-2.5 border-b border-slate-100 flex gap-4 flex-wrap items-center">
+                      {zoneConfig.map((z) => (
+                        <div key={z.label} className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${z.dot}`} />
+                          <span className={`text-xs font-semibold ${z.text}`}>{z.label}</span>
+                          <span className="text-xs text-slate-400">{z.positions}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Scrollable comparison table */}
+                    <div className="overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+                      <table className="w-full border-collapse" style={{ minWidth: '600px' }}>
+                        <thead>
+                          <tr>
+                            <th className="sticky left-0 z-10 bg-slate-900 h-14 px-3 text-left align-bottom pb-2" style={{ boxShadow: '3px 0 8px -3px rgba(0,0,0,0.1)', minWidth: '180px' }}>
+                              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">AFL Ladder</span>
+                            </th>
+                            {sortedPredictions.map((mp) => {
+                              const isMe = mp.userId === currentUser?.id
+                              const total = totalForMember(mp, aflTeams)
+                              return (
+                                <th key={mp.userId} className={`h-14 px-2 align-bottom pb-2 border-l border-slate-100 ${isMe ? 'bg-emerald-50' : 'bg-slate-50'}`} style={{ minWidth: '5.5rem' }}>
+                                  <span className="text-xs font-bold text-slate-900 block truncate">{mp.displayName}</span>
+                                  <div className="flex items-center gap-1 mt-0.5">
+                                    {isMe && <span className="text-[10px] font-semibold text-emerald-600">You</span>}
+                                    {isMe && <span className="text-[10px] text-slate-400">·</span>}
+                                    <span className="text-[10px] text-slate-400 font-semibold">{total} pts</span>
+                                  </div>
+                                </th>
+                              )
+                            })}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {aflTeams.map((team, i) => {
+                            const meta = getTeamMeta(team)
+                            const zone = getZone(i)
+                            const { allSame, isKeyTeam } = classifyTeam(team, sortedPredictions)
+                            const rowBg = allSame ? 'bg-slate-50/60' : isKeyTeam ? 'bg-amber-50/40' : ''
+
+                            return (
+                              <tr key={team} className={`border-b border-slate-50 cursor-pointer hover:bg-slate-100/50 transition-colors ${rowBg}`} onClick={() => { setSelectedTeam(team); setLadderView('spotlight') }}>
+                                {/* Sticky AFL column */}
+                                <td className={`sticky left-0 z-10 bg-white h-12 px-2 ${allSame ? 'bg-slate-50/60' : ''}`} style={{ boxShadow: '3px 0 8px -3px rgba(0,0,0,0.1)' }}>
+                                  <div className={`flex items-center gap-2 ${allSame ? 'opacity-40' : ''}`}>
+                                    <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-black flex-shrink-0 ${posBadgeClass(i)}`}>{i + 1}</span>
+                                    <div
+                                      className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black shadow-sm flex-shrink-0"
+                                      style={{
+                                        backgroundColor: meta.primaryColor,
+                                        color: meta.textColor,
+                                        border: meta.primaryColor === '#000000' ? '1px solid #333' : 'none',
+                                      }}
+                                    >
+                                      {meta.shortName}
+                                    </div>
+                                    <div className="min-w-0 hidden sm:block">
+                                      <div className="flex items-center gap-1.5">
+                                        <p className="font-semibold text-slate-900 text-xs leading-tight truncate">{team}</p>
+                                        {isKeyTeam && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />}
+                                      </div>
+                                      <p className={`text-[10px] ${zone.text}`}>{zone.label}</p>
+                                    </div>
+                                  </div>
+                                </td>
+
+                                {/* Member cells */}
+                                {sortedPredictions.map((mp) => {
+                                  const isMe = mp.userId === currentUser?.id
+                                  const { predictedPos, diff, points } = getScoreForMember(mp, team, aflTeams)
+                                  const pts = points ?? 0
+
+                                  let cellContent
+                                  if (allSame) {
+                                    cellContent = <span className="text-[10px] text-slate-300">#{predictedPos}</span>
+                                  } else if (pts === 0) {
+                                    cellContent = <span className="text-xs font-black text-emerald-500">#{predictedPos}</span>
+                                  } else {
+                                    const arrow = diff !== null && diff < 0 ? (
+                                      <svg className="w-2.5 h-2.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" /></svg>
+                                    ) : (
+                                      <svg className="w-2.5 h-2.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" /></svg>
+                                    )
+                                    cellContent = (
+                                      <>
+                                        <span className={`text-[10px] ${isKeyTeam ? 'font-bold text-slate-700' : 'font-bold text-slate-500'}`}>#{predictedPos}</span>
+                                        <span className="flex items-center gap-px">
+                                          {arrow}
+                                          <span className={`${isKeyTeam ? 'font-black text-sm' : 'text-xs font-black'} ${ptsColorClass(pts)}`}>{pts}</span>
+                                        </span>
+                                      </>
+                                    )
+                                  }
+
+                                  const cellBg = allSame ? '' : pts === 0 ? 'bg-emerald-50/50' : isMe ? 'bg-emerald-50/20' : ''
+                                  return (
+                                    <td key={mp.userId} className={`h-12 text-center border-l border-slate-50 ${cellBg}`}>
+                                      <div className="flex items-center justify-center gap-1 px-1">{cellContent}</div>
+                                    </td>
+                                  )
+                                })}
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t-2 border-slate-200">
+                            <td className="sticky left-0 z-10 bg-slate-900 px-3 py-3" style={{ boxShadow: '3px 0 8px -3px rgba(0,0,0,0.1)' }}>
+                              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total</span>
+                            </td>
+                            {sortedPredictions.map((mp) => {
+                              const isMe = mp.userId === currentUser?.id
+                              const total = totalForMember(mp, aflTeams)
+                              const best = Math.min(...sortedPredictions.map(m => totalForMember(m, aflTeams)))
+                              return (
+                                <td key={mp.userId} className={`border-l border-slate-100 px-2 py-3 text-center ${isMe ? 'bg-emerald-50' : 'bg-slate-50'}`}>
+                                  <span className={`text-lg font-black ${total === best ? 'text-emerald-600' : 'text-slate-900'}`}>{total}</span>
+                                  <p className="text-[10px] text-slate-400 mt-0.5">{total === best ? 'Leading!' : `+${total - best}`}</p>
+                                </td>
+                              )
+                            })}
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-5 flex-wrap text-xs text-slate-400">
+                      <span><span className="font-black text-emerald-500">#3</span> = correct position</span>
+                      <span className="text-slate-200">|</span>
+                      <span>Points = |predicted − actual| · lower is better</span>
+                      <span className="text-slate-200">|</span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
+                        <span className="font-semibold text-amber-600">Key team</span> = 3+ positions apart
+                      </span>
+                      <span className="text-slate-200">|</span>
+                      <span className="text-slate-300">Grey row</span> = everyone agrees
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* ── My Score view ── */}
             {ladderView === 'ladder' && (
