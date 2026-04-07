@@ -12,6 +12,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
 const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Australia/Melbourne';
 
 // Middleware
@@ -25,7 +26,7 @@ app.use(express.json());
 // Health check — BUILD_TIME is injected at compile time to verify Railway has the latest deploy
 const BUILD_TIME = new Date().toISOString();
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), buildTime: BUILD_TIME });
+  res.json({ status: 'ok', environment: NODE_ENV, timestamp: new Date().toISOString(), buildTime: BUILD_TIME });
 });
 
 // Routes
@@ -59,11 +60,11 @@ db.connect()
   .then(() => runMigrations())
   .then(() => {
     app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+      console.log(`Server running on port ${PORT} [${NODE_ENV}]`);
     });
 
     // Schedule automatic AFL ladder sync from Squiggle in Melbourne time (production only)
-    if (process.env.NODE_ENV === 'production') {
+    if (NODE_ENV === 'production') {
       cron.schedule('0 13-23,0 * * *', () => {
         syncLadderFromSquiggle();
       }, { timezone: APP_TIMEZONE });
@@ -73,6 +74,8 @@ db.connect()
         runFantasySyncJobs()
       }, { timezone: APP_TIMEZONE })
       console.log(`[FantasySync] Scheduled: ingestion/pricing/scoring every 30 minutes in ${APP_TIMEZONE}`)
+    } else {
+      console.log(`[Scheduler] Cron jobs disabled in ${NODE_ENV} environment`);
     }
   })
   .catch((err) => {
