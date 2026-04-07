@@ -59,43 +59,40 @@
         </div>
       </div>
 
-      <!-- Zone legend -->
-      <div class="px-5 py-2.5 border-b border-slate-100 flex gap-4 flex-wrap" id="zoneLegend"></div>
+      <!-- Zone + key legend -->
+      <div class="px-5 py-2.5 border-b border-slate-100 flex gap-4 flex-wrap items-center" id="zoneLegend"></div>
 
-      <!-- Comparison table -->
-      <div class="flex" style="min-height:0">
-        <!-- LEFT: Sticky AFL column -->
-        <div class="flex-shrink-0 z-10 bg-white" style="box-shadow:3px 0 8px -3px rgba(0,0,0,0.1)">
-          <!-- Header row -->
-          <div class="h-16 flex items-end px-3 pb-2 border-b border-slate-200 bg-slate-900">
-            <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">AFL Ladder</span>
-          </div>
-          <!-- Team rows -->
-          <div id="aflColumn"></div>
-        </div>
-
-        <!-- RIGHT: Scrollable member columns -->
-        <div class="overflow-x-auto flex-1 hide-scrollbar">
-          <div class="flex min-w-full" id="memberColumns"></div>
-        </div>
-      </div>
-
-      <!-- Totals row -->
-      <div class="border-t-2 border-slate-200 flex" id="totalsRow">
-        <div class="flex-shrink-0 z-10 bg-slate-900 px-4 py-3 flex items-center" style="box-shadow:3px 0 8px -3px rgba(0,0,0,0.1)" id="totalsLabel">
-          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Score</span>
-        </div>
-        <div class="overflow-x-auto flex-1 hide-scrollbar">
-          <div class="flex min-w-full" id="totalsColumns"></div>
-        </div>
+      <!-- Comparison table (single scrollable container keeps columns aligned) -->
+      <div class="overflow-x-auto hide-scrollbar" id="tableScroller">
+        <table class="w-full border-collapse" style="min-width:600px">
+          <thead>
+            <tr>
+              <th class="sticky left-0 z-10 bg-slate-900 h-14 px-3 text-left align-bottom pb-2 min-w-[180px]" style="box-shadow:3px 0 8px -3px rgba(0,0,0,0.1)">
+                <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">AFL Ladder</span>
+              </th>
+              <!-- Member headers injected by JS -->
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+          <tfoot>
+            <tr id="totalsRow" class="border-t-2 border-slate-200"></tr>
+          </tfoot>
+        </table>
       </div>
 
       <!-- Footer -->
-      <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-5 text-xs text-slate-400">
-        <span class="flex items-center gap-1 font-semibold text-emerald-600">&#10003; 0</span>
+      <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-5 flex-wrap text-xs text-slate-400">
+        <span class="flex items-center gap-1 font-semibold text-emerald-600">&#10003;</span>
         <span>= nailed it</span>
-        <span class="mx-1">|</span>
-        <span>Points = |predicted &minus; actual| · lower is better</span>
+        <span class="mx-1 text-slate-200">|</span>
+        <span>Points = |predicted &minus; actual| &middot; lower is better</span>
+        <span class="mx-1 text-slate-200">|</span>
+        <span class="flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>
+          <span class="font-semibold text-amber-600">Key team</span> = 3+ positions apart in the league
+        </span>
+        <span class="mx-1 text-slate-200">|</span>
+        <span class="text-slate-300">Grey row</span> = everyone agrees
       </div>
     </div>
 
@@ -136,7 +133,7 @@ const getTeamMeta = (name) => AFL_TEAMS.find(t => t.name === name) || {
   name, shortName: name.slice(0,3).toUpperCase(), primaryColor: '#334155', secondaryColor: '#fff', textColor: '#fff'
 };
 
-// ── Mock AFL Ladder (actual current positions) ──
+// ── Mock AFL Ladder ──
 const aflLadder = [
   'Geelong', 'Sydney Swans', 'Brisbane Lions', 'Carlton',
   'Collingwood', 'Port Adelaide', 'Western Bulldogs', 'Hawthorn',
@@ -145,7 +142,7 @@ const aflLadder = [
   'North Melbourne', 'West Coast Eagles'
 ];
 
-// ── Mock Members + Predictions ──
+// ── Mock Members ──
 const members = [
   { name: 'Matt',  userId: 1, isMe: true,  ladder: ['Carlton','Brisbane Lions','Geelong','Collingwood','Sydney Swans','Melbourne','Port Adelaide','Fremantle','Hawthorn','Western Bulldogs','Essendon','GWS Giants','Richmond','St Kilda','Adelaide Crows','Gold Coast Suns','North Melbourne','West Coast Eagles'] },
   { name: 'Davo',  userId: 2, isMe: false, ladder: ['Geelong','Carlton','Sydney Swans','Brisbane Lions','Collingwood','Hawthorn','Port Adelaide','Melbourne','Fremantle','Western Bulldogs','Essendon','GWS Giants','Adelaide Crows','Richmond','St Kilda','Gold Coast Suns','North Melbourne','West Coast Eagles'] },
@@ -153,7 +150,7 @@ const members = [
   { name: 'Bazza', userId: 4, isMe: false, ladder: ['Brisbane Lions','Geelong','Carlton','Sydney Swans','Port Adelaide','Collingwood','Fremantle','Hawthorn','Melbourne','Western Bulldogs','GWS Giants','Essendon','Adelaide Crows','St Kilda','Gold Coast Suns','Richmond','West Coast Eagles','North Melbourne'] },
 ];
 
-// ── Zones ──
+// ── Helpers ──
 const zones = [
   { label: 'Top 4',  positions: '1\u20134',  range: [0,3],   text: 'text-emerald-600', dot: 'bg-emerald-500' },
   { label: 'Finals', positions: '5\u201310', range: [4,9],   text: 'text-blue-600',    dot: 'bg-blue-500' },
@@ -176,7 +173,6 @@ function ptsColor(pts) {
   return 'text-red-500';
 }
 
-// ── Compute scores for each member x team ──
 function getScore(member, teamName) {
   const actualPos = aflLadder.indexOf(teamName) + 1;
   const predIdx = member.ladder.indexOf(teamName);
@@ -190,14 +186,23 @@ function totalFor(member) {
   return aflLadder.reduce((sum, team) => sum + (getScore(member, team).points || 0), 0);
 }
 
-// Sort members: current user first, then by total score
+// ── Classify each team row ──
+function classifyTeam(teamName) {
+  const positions = members.map(m => m.ladder.indexOf(teamName) + 1);
+  const allSame = positions.every(p => p === positions[0]);
+  const spread = Math.max(...positions) - Math.min(...positions);
+  const isKeyTeam = spread >= 3;
+  return { allSame, isKeyTeam, spread };
+}
+
+// Sort: user first, then by total
 members.sort((a, b) => {
   if (a.isMe) return -1;
   if (b.isMe) return 1;
   return totalFor(a) - totalFor(b);
 });
 
-// ── Render zone legend ──
+// ── Zone legend ──
 document.getElementById('zoneLegend').innerHTML = zones.map(z => `
   <div class="flex items-center gap-1.5">
     <span class="w-2 h-2 rounded-full flex-shrink-0 ${z.dot}"></span>
@@ -206,88 +211,108 @@ document.getElementById('zoneLegend').innerHTML = zones.map(z => `
   </div>
 `).join('');
 
-// ── Render AFL left column ──
-document.getElementById('aflColumn').innerHTML = aflLadder.map((team, i) => {
+// ── Build table ──
+const thead = document.querySelector('thead tr');
+members.forEach(member => {
+  const total = totalFor(member);
+  thead.innerHTML += `
+    <th class="h-14 px-2 align-bottom pb-2 min-w-[5.5rem] border-l border-slate-100 ${member.isMe ? 'bg-emerald-50' : 'bg-slate-50'}">
+      <span class="text-xs font-bold text-slate-900 block truncate">${member.name}</span>
+      <div class="flex items-center gap-1 mt-0.5">
+        ${member.isMe ? '<span class="text-[10px] font-semibold text-emerald-600">You</span><span class="text-[10px] text-slate-400">&middot;</span>' : ''}
+        <span class="text-[10px] text-slate-400 font-semibold">${total} pts</span>
+      </div>
+    </th>`;
+});
+
+const tbody = document.getElementById('tableBody');
+aflLadder.forEach((team, i) => {
   const meta = getTeamMeta(team);
   const zone = getZone(i);
   const borderStyle = meta.primaryColor === '#000000' ? 'border:1px solid #333' : 'border:none';
-  return `
-    <div class="h-12 flex items-center gap-2 px-2 border-b border-slate-50 cursor-pointer hover:bg-slate-50 transition-colors" onclick="showTeamDetail('${team}')">
-      <span class="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-black flex-shrink-0 ${posBadgeClass(i)}">${i+1}</span>
-      <div class="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black shadow-sm flex-shrink-0"
-           style="background-color:${meta.primaryColor};color:${meta.textColor};${borderStyle}">
-        ${meta.shortName}
-      </div>
-      <div class="min-w-0 hidden sm:block">
-        <p class="font-semibold text-slate-900 text-xs leading-tight truncate">${team}</p>
-        <p class="text-[10px] ${zone.text}">${zone.label}</p>
-      </div>
-    </div>`;
-}).join('');
+  const { allSame, isKeyTeam } = classifyTeam(team);
 
-// ── Render member columns ──
-document.getElementById('memberColumns').innerHTML = members.map(member => {
-  const total = totalFor(member);
-  // Header
-  let html = `<div class="flex-[1_0_5.5rem] border-l border-slate-100">
-    <div class="h-16 flex flex-col justify-end px-2 pb-2 border-b border-slate-200 ${member.isMe ? 'bg-emerald-50' : 'bg-slate-50'}">
-      <span class="text-xs font-bold text-slate-900 truncate">${member.name}</span>
-      <div class="flex items-center gap-1 mt-0.5">
-        ${member.isMe ? '<span class="text-[10px] font-semibold text-emerald-600">You</span><span class="text-[10px] text-slate-400">·</span>' : ''}
-        <span class="text-[10px] text-slate-400 font-semibold">${total} pts</span>
-      </div>
-    </div>`;
+  // Row styling
+  const rowBg = allSame ? 'bg-slate-50/60' : isKeyTeam ? 'bg-amber-50/40' : '';
+  const textOpacity = allSame ? 'opacity-40' : '';
 
-  // Score rows
-  aflLadder.forEach(team => {
+  let row = `<tr class="border-b border-slate-50 cursor-pointer hover:bg-slate-100/50 transition-colors ${rowBg}" onclick="showTeamDetail('${team.replace(/'/g, "\\'")}')">`;
+
+  // Sticky AFL column
+  row += `
+    <td class="sticky left-0 z-10 bg-white h-12 px-2 ${allSame ? 'bg-slate-50/60' : ''}" style="box-shadow:3px 0 8px -3px rgba(0,0,0,0.1)">
+      <div class="flex items-center gap-2 ${textOpacity}">
+        <span class="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-black flex-shrink-0 ${posBadgeClass(i)}">${i+1}</span>
+        <div class="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black shadow-sm flex-shrink-0"
+             style="background-color:${meta.primaryColor};color:${meta.textColor};${borderStyle}">
+          ${meta.shortName}
+        </div>
+        <div class="min-w-0 hidden sm:block">
+          <div class="flex items-center gap-1.5">
+            <p class="font-semibold text-slate-900 text-xs leading-tight truncate">${team}</p>
+            ${isKeyTeam ? '<span class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"></span>' : ''}
+          </div>
+          <p class="text-[10px] ${zone.text}">${zone.label}</p>
+        </div>
+      </div>
+    </td>`;
+
+  // Member cells
+  members.forEach(member => {
     const { predictedPos, diff, points } = getScore(member, team);
     const pts = points ?? 0;
 
     let cellContent;
-    if (pts === 0) {
+    if (allSame) {
+      // Everyone agrees — muted
+      cellContent = `<span class="text-[10px] text-slate-300">#${predictedPos}</span>`;
+    } else if (pts === 0) {
       cellContent = `<span class="text-xs font-black text-emerald-500">&#10003;</span>`;
     } else {
       const arrow = diff < 0
         ? `<svg class="w-2.5 h-2.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 15l7-7 7 7"/></svg>`
         : `<svg class="w-2.5 h-2.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"/></svg>`;
+      const boldClass = isKeyTeam ? 'font-black text-sm' : 'text-xs font-black';
       cellContent = `
-        <span class="text-[10px] font-bold text-slate-500">#${predictedPos}</span>
+        <span class="text-[10px] ${isKeyTeam ? 'font-bold text-slate-700' : 'font-bold text-slate-500'}">#${predictedPos}</span>
         <span class="flex items-center gap-px">
           ${arrow}
-          <span class="text-xs font-black ${ptsColor(pts)}">${pts}</span>
+          <span class="${boldClass} ${ptsColor(pts)}">${pts}</span>
         </span>`;
     }
 
-    html += `
-      <div class="h-12 flex items-center justify-center gap-1 px-1 border-b border-slate-50 ${pts === 0 ? 'bg-emerald-50/50' : ''} ${member.isMe && pts !== 0 ? 'bg-emerald-50/20' : ''}">
-        ${cellContent}
-      </div>`;
+    const cellBg = allSame ? '' : pts === 0 ? 'bg-emerald-50/50' : member.isMe ? 'bg-emerald-50/20' : '';
+    row += `<td class="h-12 text-center border-l border-slate-50 ${cellBg}"><div class="flex items-center justify-center gap-1 px-1">${cellContent}</div></td>`;
   });
 
-  html += '</div>';
-  return html;
-}).join('');
+  row += '</tr>';
+  tbody.innerHTML += row;
+});
 
 // ── Totals row ──
-// Match width of AFL column
-const aflColEl = document.querySelector('#aflColumn').parentElement;
-document.getElementById('totalsLabel').style.width = aflColEl.offsetWidth + 'px';
+const totalsRow = document.getElementById('totalsRow');
+const best = Math.min(...members.map(m => totalFor(m)));
 
-document.getElementById('totalsColumns').innerHTML = members.map(member => {
+totalsRow.innerHTML = `
+  <td class="sticky left-0 z-10 bg-slate-900 px-3 py-3" style="box-shadow:3px 0 8px -3px rgba(0,0,0,0.1)">
+    <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Total</span>
+  </td>`;
+
+members.forEach(member => {
   const total = totalFor(member);
-  const best = Math.min(...members.map(m => totalFor(m)));
-  return `
-    <div class="flex-[1_0_5.5rem] border-l border-slate-100 px-2 py-3 text-center ${member.isMe ? 'bg-emerald-50' : 'bg-slate-50'}">
+  totalsRow.innerHTML += `
+    <td class="border-l border-slate-100 px-2 py-3 text-center ${member.isMe ? 'bg-emerald-50' : 'bg-slate-50'}">
       <span class="text-lg font-black ${total === best ? 'text-emerald-600' : 'text-slate-900'}">${total}</span>
       <p class="text-[10px] text-slate-400 mt-0.5">${total === best ? 'Leading!' : `+${total - best}`}</p>
-    </div>`;
-}).join('');
+    </td>`;
+});
 
 // ── Team Detail Drawer ──
 function showTeamDetail(teamName) {
   const meta = getTeamMeta(teamName);
   const actualPos = aflLadder.indexOf(teamName) + 1;
   const borderStyle = meta.primaryColor === '#000000' ? 'border:1px solid #333' : 'border:none';
+  const { isKeyTeam, spread } = classifyTeam(teamName);
 
   const drawer = document.getElementById('teamDrawer');
   drawer.classList.remove('hidden');
@@ -296,7 +321,7 @@ function showTeamDetail(teamName) {
     <div class="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black shadow-sm flex-shrink-0"
          style="background-color:${meta.primaryColor};color:${meta.textColor};${borderStyle}">${meta.shortName}</div>
     <div>
-      <p class="font-bold text-slate-900">${teamName}</p>
+      <p class="font-bold text-slate-900">${teamName}${isKeyTeam ? ' <span class="text-xs font-bold text-amber-600 ml-1">Key Team &middot; ${spread} pos spread</span>' : ''}</p>
       <p class="text-xs text-slate-500">Currently #${actualPos} on the AFL ladder</p>
     </div>`;
 
@@ -325,7 +350,7 @@ function showTeamDetail(teamName) {
           ${row.isMe ? '<span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">You</span>' : ''}
         </div>
         <div class="text-right w-20"><span class="text-lg font-black text-slate-900">#${row.predictedPos}</span></div>
-        <div class="text-right w-16"><span class="text-sm font-semibold text-slate-500">#${row.diff + row.predictedPos}</span></div>
+        <div class="text-right w-16"><span class="text-sm font-semibold text-slate-500">#${actualPos}</span></div>
         <div class="text-right w-12">
           <span class="inline-flex items-center justify-center w-8 h-8 rounded-xl text-xs font-black ${diffColor}">
             ${row.error === 0 ? '&#10003;' : row.error}
