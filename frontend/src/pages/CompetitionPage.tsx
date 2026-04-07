@@ -47,6 +47,92 @@ interface MemberPrediction {
   ladder: string[]
 }
 
+// ── AFL Team Colours & Helpers (matching PredictionPage) ─────────────────────
+
+interface AFLTeamMeta {
+  name: string
+  shortName: string
+  primaryColor: string
+  secondaryColor: string
+  textColor: string
+}
+
+const AFL_TEAM_META: AFLTeamMeta[] = [
+  { name: 'Melbourne',        shortName: 'MEL', primaryColor: '#041E42', secondaryColor: '#CC2031', textColor: '#FFFFFF' },
+  { name: 'St Kilda',         shortName: 'STK', primaryColor: '#000000', secondaryColor: '#ED1C24', textColor: '#FFFFFF' },
+  { name: 'Collingwood',      shortName: 'COL', primaryColor: '#000000', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'Brisbane Lions',   shortName: 'BRL', primaryColor: '#69003B', secondaryColor: '#0055A3', textColor: '#FFFFFF' },
+  { name: 'Port Adelaide',    shortName: 'PTA', primaryColor: '#008AAB', secondaryColor: '#000000', textColor: '#FFFFFF' },
+  { name: 'Carlton',          shortName: 'CAR', primaryColor: '#001B2A', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'North Melbourne',  shortName: 'NTH', primaryColor: '#003C71', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'GWS Giants',       shortName: 'GWS', primaryColor: '#F15C22', secondaryColor: '#4A4F55', textColor: '#FFFFFF' },
+  { name: 'Richmond',         shortName: 'RIC', primaryColor: '#000000', secondaryColor: '#FED102', textColor: '#FED102' },
+  { name: 'Fremantle',        shortName: 'FRE', primaryColor: '#2E0854', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'Essendon',         shortName: 'ESS', primaryColor: '#000000', secondaryColor: '#CC2031', textColor: '#CC2031' },
+  { name: 'Adelaide Crows',   shortName: 'ADE', primaryColor: '#002654', secondaryColor: '#E21E31', textColor: '#FFD200' },
+  { name: 'Gold Coast Suns',  shortName: 'GCS', primaryColor: '#CF2032', secondaryColor: '#F4B223', textColor: '#FFFFFF' },
+  { name: 'Geelong',          shortName: 'GEE', primaryColor: '#001F3D', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'Hawthorn',         shortName: 'HAW', primaryColor: '#4D2004', secondaryColor: '#FBBF15', textColor: '#FBBF15' },
+  { name: 'Sydney Swans',     shortName: 'SYD', primaryColor: '#ED171F', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'West Coast Eagles',shortName: 'WCE', primaryColor: '#002B5C', secondaryColor: '#F2A900', textColor: '#F2A900' },
+  { name: 'Western Bulldogs', shortName: 'WBD', primaryColor: '#014896', secondaryColor: '#E1251B', textColor: '#FFFFFF' },
+]
+
+const getTeamMeta = (name: string): AFLTeamMeta =>
+  AFL_TEAM_META.find((t) => t.name === name) ?? {
+    name,
+    shortName: name.slice(0, 3).toUpperCase(),
+    primaryColor: '#334155',
+    secondaryColor: '#ffffff',
+    textColor: '#ffffff',
+  }
+
+const zoneConfig = [
+  { label: 'Top 4',  positions: '1–4',   range: [0, 3],  text: 'text-emerald-600', dot: 'bg-emerald-500' },
+  { label: 'Finals', positions: '5–10',  range: [4, 9],  text: 'text-blue-600',    dot: 'bg-blue-500'   },
+  { label: 'Mid',    positions: '11–14', range: [10, 13],text: 'text-slate-500',   dot: 'bg-slate-400'  },
+  { label: 'Bottom', positions: '15–18', range: [14, 17],text: 'text-red-500',     dot: 'bg-red-500'    },
+]
+const getZone = (i: number) => zoneConfig.find((z) => i >= z.range[0] && i <= z.range[1])!
+
+function posBadgeClass(i: number) {
+  if (i < 4)              return 'bg-emerald-500 text-white'
+  if (i >= 4 && i < 10)  return 'bg-blue-100 text-blue-700'
+  if (i >= 10 && i < 14) return 'bg-slate-100 text-slate-600'
+  return 'bg-red-100 text-red-600'
+}
+
+function ScoreDiffBadge({ diff, points }: { diff: number | null; points: number | null }) {
+  if (diff === null || points === null) {
+    return <span className="text-xs text-slate-300 font-mono w-12 text-center">—</span>
+  }
+  if (diff === 0) {
+    return (
+      <span className="inline-flex items-center justify-center w-12 text-xs font-bold text-emerald-600">
+        ✓ 0
+      </span>
+    )
+  }
+  if (diff < 0) {
+    return (
+      <span className="inline-flex items-center justify-center gap-0.5 w-12 text-xs font-bold text-emerald-600">
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+        </svg>
+        {Math.abs(diff)}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center justify-center gap-0.5 w-12 text-xs font-bold text-red-500">
+      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+      </svg>
+      {Math.abs(diff)}
+    </span>
+  )
+}
+
 const RankBadge = ({ rank }: { rank: number }) => {
   if (rank === 1) return (
     <div className="w-8 h-8 rounded-full bg-amber-400 flex items-center justify-center flex-shrink-0">
@@ -189,6 +275,34 @@ export default function CompetitionPage() {
       })
       .sort((a, b) => a.predictedPos - b.predictedPos)
   }, [selectedTeam, aflTeams, memberPredictions, leaderboard])
+
+  // Current user's score breakdown — AFL ladder with predicted position & points per team
+  const myScoreRows = useMemo(() => {
+    if (aflTeams.length === 0 || memberPredictions.length === 0 || !currentUser) return []
+    const myPrediction = memberPredictions.find(mp => mp.userId === currentUser.id)
+    if (!myPrediction) return []
+
+    return aflTeams.map((teamName, i) => {
+      const actualPos = i + 1
+      const predIdx = myPrediction.ladder.indexOf(teamName)
+      const predictedPos = predIdx >= 0 ? predIdx + 1 : null
+      const diff = predictedPos !== null ? predictedPos - actualPos : null
+      const points = diff !== null ? Math.abs(diff) : null
+      return { teamName, actualPos, predictedPos, diff, points }
+    })
+  }, [aflTeams, memberPredictions, currentUser])
+
+  const myTotalScore = useMemo(() => {
+    if (myScoreRows.length === 0) return null
+    if (myScoreRows.some(r => r.points === null)) return null
+    return myScoreRows.reduce((sum, r) => sum + (r.points ?? 0), 0)
+  }, [myScoreRows])
+
+  const myLeaderboardRank = useMemo(() => {
+    if (!currentUser) return null
+    const idx = leaderboard.findIndex(l => l.userId === currentUser.id)
+    return idx >= 0 ? idx + 1 : null
+  }, [leaderboard, currentUser])
 
   const handleCopyCode = () => {
     if (competition) {
@@ -656,7 +770,7 @@ export default function CompetitionPage() {
           </div>
         </div>
 
-        {/* ── Member Ladders (revealed after lockout) ── */}
+        {/* ── My Score vs AFL Ladder (revealed after lockout) ── */}
         {competitionLocked && (
           <div className="mt-6 bg-white rounded-2xl border border-slate-200 overflow-hidden">
             {/* Header + tab switcher */}
@@ -665,15 +779,11 @@ export default function CompetitionPage() {
                 <span className="text-base">🔒</span>
               </div>
               <div className="flex-1 min-w-0">
-                <h2 className="text-lg font-bold text-slate-900">League Ladders</h2>
-                {ladderView === 'ladder' && aflTeams.length > 0 && (
-                  <p className="text-sm text-slate-500 mt-0.5">
-                    Side-by-side comparison · scroll right to see all
-                    <span className="ml-2 inline-flex items-center gap-1">
-                      <span className="w-2 h-2 bg-emerald-500 rounded-full inline-block" />
-                      <span className="text-emerald-600 font-medium">= matches AFL Now</span>
-                    </span>
-                  </p>
+                <h2 className="text-lg font-bold text-slate-900">
+                  {ladderView === 'ladder' ? 'My Score' : 'Team Spotlight'}
+                </h2>
+                {ladderView === 'ladder' && (
+                  <p className="text-sm text-slate-500 mt-0.5">AFL ladder vs your prediction — lower is better</p>
                 )}
                 {ladderView === 'spotlight' && (
                   <p className="text-sm text-slate-500 mt-0.5">Select a team to see where everyone placed them</p>
@@ -685,7 +795,7 @@ export default function CompetitionPage() {
                   onClick={() => setLadderView('ladder')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${ladderView === 'ladder' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
-                  Ladder
+                  My Score
                 </button>
                 <button
                   onClick={() => setLadderView('spotlight')}
@@ -696,31 +806,226 @@ export default function CompetitionPage() {
               </div>
             </div>
 
+            {/* ── My Score view ── */}
+            {ladderView === 'ladder' && (
+              <div>
+                {myScoreRows.length === 0 ? (
+                  <div className="px-6 py-12 text-center text-slate-400 text-sm">
+                    {aflTeams.length === 0
+                      ? 'AFL ladder data not yet available.'
+                      : 'No prediction submitted — scores will appear once you have a submission.'}
+                  </div>
+                ) : (
+                  <>
+                    {/* Score summary banner */}
+                    <div className="px-5 py-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Your score</p>
+                        <div className="flex items-baseline gap-2 mt-0.5">
+                          <span className="text-3xl font-black text-slate-900">
+                            {myTotalScore !== null ? myTotalScore : '—'}
+                          </span>
+                          <span className="text-sm text-slate-400 font-medium">points</span>
+                          {myLeaderboardRank && (
+                            <span className="text-xs text-slate-400">
+                              · Rank #{myLeaderboardRank} of {leaderboard.length}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-4">
+                        <div className="text-center">
+                          <p className="text-lg font-black text-emerald-600">
+                            {myScoreRows.filter(r => r.diff === 0).length}
+                          </p>
+                          <p className="text-xs text-slate-400">perfect</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-lg font-black text-emerald-600">
+                            {myScoreRows.filter(r => r.diff !== null && r.diff < 0).length}
+                          </p>
+                          <p className="text-xs text-slate-400">↑ over</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-lg font-black text-red-500">
+                            {myScoreRows.filter(r => r.diff !== null && r.diff > 0).length}
+                          </p>
+                          <p className="text-xs text-slate-400">↓ under</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Zone legend */}
+                    <div className="px-5 py-2.5 border-b border-slate-100 flex gap-4 flex-wrap">
+                      {zoneConfig.map((z) => (
+                        <div key={z.label} className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${z.dot}`} />
+                          <span className={`text-xs font-semibold ${z.text}`}>{z.label}</span>
+                          <span className="text-xs text-slate-400">{z.positions}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Column headers */}
+                    <div className="grid grid-cols-[2.5rem_1fr_2.5rem_3rem_2.5rem] items-center px-4 py-2.5 bg-slate-900 text-slate-400 text-xs font-semibold uppercase tracking-widest">
+                      <div className="text-center">AFL</div>
+                      <div className="pl-2">Team</div>
+                      <div className="text-center">My</div>
+                      <div className="text-center">Move</div>
+                      <div className="text-center">Pts</div>
+                    </div>
+
+                    {/* Team rows — ordered by actual AFL position */}
+                    <div className="divide-y divide-slate-50">
+                      {myScoreRows.map((row) => {
+                        const meta = getTeamMeta(row.teamName)
+                        const zone = getZone(row.actualPos - 1)
+                        const pts = row.points
+
+                        return (
+                          <div
+                            key={row.teamName}
+                            className={`grid grid-cols-[2.5rem_1fr_2.5rem_3rem_2.5rem] items-center px-4 py-2.5 ${
+                              pts === 0 ? 'bg-emerald-50/40' : ''
+                            }`}
+                          >
+                            {/* AFL actual position */}
+                            <div className="flex justify-center">
+                              <span className={`inline-flex items-center justify-center w-6 h-6 rounded-lg text-xs font-black ${posBadgeClass(row.actualPos - 1)}`}>
+                                {row.actualPos}
+                              </span>
+                            </div>
+
+                            {/* Team badge + name */}
+                            <div className="flex items-center gap-2.5 pl-2 min-w-0">
+                              <div
+                                className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shadow-sm flex-shrink-0"
+                                style={{
+                                  backgroundColor: meta.primaryColor,
+                                  color: meta.textColor,
+                                  border: meta.primaryColor === '#000000' ? '1px solid #333' : 'none',
+                                }}
+                              >
+                                {meta.shortName}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-semibold text-slate-900 text-sm leading-tight truncate">{row.teamName}</p>
+                                <p className={`text-xs ${zone.text}`}>{zone.label}</p>
+                              </div>
+                            </div>
+
+                            {/* My predicted position */}
+                            <div className="flex justify-center">
+                              {row.predictedPos !== null ? (
+                                <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-black ${posBadgeClass(row.predictedPos - 1)}`}>
+                                  {row.predictedPos}
+                                </span>
+                              ) : (
+                                <span className="w-7 text-center text-xs text-slate-300">—</span>
+                              )}
+                            </div>
+
+                            {/* Diff arrow */}
+                            <div className="flex justify-center">
+                              <ScoreDiffBadge diff={row.diff} points={pts} />
+                            </div>
+
+                            {/* Points */}
+                            <div className="flex justify-center">
+                              <span className={`text-sm font-black ${
+                                pts === 0 ? 'text-emerald-500' :
+                                pts !== null && pts <= 2 ? 'text-emerald-600' :
+                                pts !== null && pts <= 4 ? 'text-amber-500' :
+                                'text-red-500'
+                              }`}>
+                                {pts !== null ? pts : '—'}
+                              </span>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* Footer key */}
+                    <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-5 text-xs text-slate-400">
+                      <span className="flex items-center gap-1">
+                        <svg className="w-3 h-3 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+                        </svg>
+                        Predicted higher than actual
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <svg className="w-3 h-3 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7 7" />
+                        </svg>
+                        Predicted lower than actual
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* ── Team Spotlight view ── */}
             {ladderView === 'spotlight' && (
               <div>
-                {/* Team picker */}
+                {/* Team picker — with team colours */}
                 <div className="px-6 py-4 border-b border-slate-100">
                   <div className="flex flex-wrap gap-2">
-                    {aflTeams.map(team => (
-                      <button
-                        key={team}
-                        onClick={() => setSelectedTeam(team)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                          selectedTeam === team
-                            ? 'bg-slate-900 text-white'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        {team}
-                      </button>
-                    ))}
+                    {aflTeams.map(team => {
+                      const meta = getTeamMeta(team)
+                      const isSelected = selectedTeam === team
+                      return (
+                        <button
+                          key={team}
+                          onClick={() => setSelectedTeam(team)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold transition-colors"
+                          style={isSelected ? {
+                            backgroundColor: meta.primaryColor,
+                            color: meta.textColor,
+                            border: meta.primaryColor === '#000000' ? '1px solid #333' : `1px solid ${meta.primaryColor}`,
+                          } : {
+                            backgroundColor: '#f1f5f9',
+                            color: '#475569',
+                          }}
+                        >
+                          {meta.shortName}
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
 
                 {/* Spotlight table */}
                 {selectedTeam && spotlightRows.length > 0 ? (
                   <div>
+                    {/* Selected team header */}
+                    {(() => {
+                      const meta = getTeamMeta(selectedTeam)
+                      const actualPos = aflTeams.indexOf(selectedTeam) + 1
+                      return (
+                        <div
+                          className="px-6 py-4 border-b border-slate-100 flex items-center gap-3"
+                          style={{ backgroundColor: `${meta.primaryColor}10` }}
+                        >
+                          <div
+                            className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black shadow-sm flex-shrink-0"
+                            style={{
+                              backgroundColor: meta.primaryColor,
+                              color: meta.textColor,
+                              border: meta.primaryColor === '#000000' ? '1px solid #333' : 'none',
+                            }}
+                          >
+                            {meta.shortName}
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-900">{selectedTeam}</p>
+                            <p className="text-xs text-slate-500">Currently #{actualPos} on the AFL ladder</p>
+                          </div>
+                        </div>
+                      )
+                    })()}
+
                     {/* Table header */}
                     <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-6 py-2 bg-slate-50 border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
                       <span>Member</span>
@@ -791,139 +1096,6 @@ export default function CompetitionPage() {
                 )}
               </div>
             )}
-
-            {/* ── Ladder view ── */}
-            {ladderView === 'ladder' && (memberPredictions.length === 0 ? (
-              <div className="px-6 py-12 text-center text-slate-400 text-sm">
-                No submitted ladders found.
-              </div>
-            ) : (
-              /* Horizontal scroll: sticky left panel + scrollable user columns */
-              <div className="flex" style={{ minHeight: 0 }}>
-
-                {/* ── LEFT: sticky position # + AFL Now columns ── */}
-                <div
-                  className="flex-shrink-0 z-10 bg-white"
-                  style={{ boxShadow: '3px 0 8px -3px rgba(0,0,0,0.15)' }}
-                >
-                  <div className="flex">
-                    {/* Position number column */}
-                    <div className="w-10 flex flex-col">
-                      <div className="h-14 flex items-end pb-3 px-2 border-b border-slate-100 bg-white">
-                        <span className="text-xs font-bold text-slate-400">#</span>
-                      </div>
-                      {Array.from({ length: 18 }, (_, i) => {
-                        const pos = i + 1
-                        const zoneClass =
-                          pos <= 4  ? 'bg-emerald-50/80' :
-                          pos <= 8  ? 'bg-blue-50/50' :
-                          pos <= 14 ? 'bg-white' :
-                                      'bg-red-50/50'
-                        return (
-                          <div key={pos} className={`h-9 flex items-center justify-end pr-2 border-b border-slate-50 ${zoneClass}`}>
-                            <span className="text-xs font-black text-slate-400">{pos}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-
-                    {/* AFL Now column (dark bg) — only if data is available */}
-                    {aflTeams.length > 0 && (
-                      <div className="w-32 flex flex-col bg-slate-900">
-                        <div className="h-14 flex flex-col justify-end px-3 pb-3 border-b border-slate-700">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-0.5">AFL</p>
-                          <p className="text-xs font-bold text-white leading-none">Now</p>
-                        </div>
-                        {aflTeams.map((team, i) => (
-                          <div key={i} className={`h-9 flex items-center px-3 border-b border-slate-800 ${i % 2 === 0 ? 'bg-slate-900' : 'bg-slate-800/60'}`}>
-                            <span className="text-xs font-semibold text-white truncate">{team}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* ── RIGHT: scrollable user columns ── */}
-                <div className="overflow-x-auto flex-1">
-                  <div className="flex min-w-full">
-                    {memberPredictions.map((mp) => {
-                      const entry = leaderboard.find(l => l.userId === mp.userId)
-                      const isMe = mp.userId === currentUser?.id
-                      return (
-                        <div key={mp.userId} className="flex-[1_0_9rem] border-l border-slate-100">
-                          {/* Column header */}
-                          <div className={`h-14 flex flex-col justify-end px-3 pb-3 border-b border-slate-100 ${isMe ? 'bg-emerald-50' : 'bg-slate-50'}`}>
-                            <button
-                              onClick={() => navigate(`/ladder/${mp.userId}`)}
-                              className="text-xs font-bold text-slate-900 truncate text-left hover:text-emerald-700 transition-colors"
-                            >
-                              {mp.displayName}
-                            </button>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              {isMe && (
-                                <span className="text-[10px] font-semibold text-emerald-600">You</span>
-                              )}
-                              {entry?.totalPoints != null && (
-                                <span className="text-[10px] text-slate-400 font-semibold">
-                                  {isMe ? '· ' : ''}{entry.totalPoints} pts
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Ladder rows */}
-                          {mp.ladder.map((team, i) => {
-                            const pos = i + 1
-                            const aflIdx = aflTeams.length > 0 ? aflTeams.indexOf(team) : -1
-                            const aflActualPos = aflIdx >= 0 ? aflIdx + 1 : null
-                            const diff = aflActualPos !== null ? pos - aflActualPos : null
-                            // diff > 0 → team doing better than predicted (up ↑)
-                            // diff < 0 → team doing worse than predicted (down ↓)
-                            // diff = 0 → perfect match ✓
-                            const matchesAFL = diff === 0
-                            const zoneClass =
-                              pos <= 4  ? 'bg-emerald-50/60' :
-                              pos <= 8  ? 'bg-blue-50/40' :
-                              pos <= 14 ? 'bg-white' :
-                                          'bg-red-50/30'
-                            return (
-                              <div
-                                key={i}
-                                className={`h-9 flex items-center px-2 border-b border-slate-50 ${matchesAFL ? 'bg-emerald-100' : zoneClass}`}
-                              >
-                                <span className={`text-xs font-semibold truncate flex-1 min-w-0 ${matchesAFL ? 'text-emerald-700 font-bold' : 'text-slate-700'}`}>
-                                  {team}
-                                </span>
-                                {diff === null ? null : diff === 0 ? (
-                                  <svg className="w-3 h-3 text-emerald-500 flex-shrink-0 ml-1" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                  </svg>
-                                ) : diff > 0 ? (
-                                  <span className="flex-shrink-0 ml-1 flex items-center gap-px text-emerald-600">
-                                    <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
-                                      <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
-                                    </svg>
-                                    <span className="text-[9px] font-black leading-none">{diff}</span>
-                                  </span>
-                                ) : (
-                                  <span className="flex-shrink-0 ml-1 flex items-center gap-px text-red-500">
-                                    <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
-                                      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                                    </svg>
-                                    <span className="text-[9px] font-black leading-none">{Math.abs(diff)}</span>
-                                  </span>
-                                )}
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-            ))}
           </div>
         )}
       </main>
