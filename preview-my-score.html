@@ -82,8 +82,8 @@
 
       <!-- Footer -->
       <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-5 flex-wrap text-xs text-slate-400">
-        <span class="flex items-center gap-1 font-semibold text-emerald-600">&#10003;</span>
-        <span>= nailed it</span>
+        <span class="font-black text-emerald-500 text-xs">#3</span>
+        <span>= green means correct position</span>
         <span class="mx-1 text-slate-200">|</span>
         <span>Points = |predicted &minus; actual| &middot; lower is better</span>
         <span class="mx-1 text-slate-200">|</span>
@@ -264,10 +264,11 @@ aflLadder.forEach((team, i) => {
 
     let cellContent;
     if (allSame) {
-      // Everyone agrees — muted
+      // Everyone agrees — muted position number
       cellContent = `<span class="text-[10px] text-slate-300">#${predictedPos}</span>`;
     } else if (pts === 0) {
-      cellContent = `<span class="text-xs font-black text-emerald-500">&#10003;</span>`;
+      // Correct — just show position in green, no tick
+      cellContent = `<span class="text-xs font-black text-emerald-500">#${predictedPos}</span>`;
     } else {
       const arrow = diff < 0
         ? `<svg class="w-2.5 h-2.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 15l7-7 7 7"/></svg>`
@@ -353,7 +354,7 @@ function showTeamDetail(teamName) {
         <div class="text-right w-16"><span class="text-sm font-semibold text-slate-500">#${actualPos}</span></div>
         <div class="text-right w-12">
           <span class="inline-flex items-center justify-center w-8 h-8 rounded-xl text-xs font-black ${diffColor}">
-            ${row.error === 0 ? '&#10003;' : row.error}
+            ${row.error === 0 ? '#' + row.predictedPos : row.error}
           </span>
         </div>
       </div>`;
