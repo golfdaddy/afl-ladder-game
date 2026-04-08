@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useAuthStore } from '../store/auth'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -84,6 +84,7 @@ export default function DashboardPage() {
   const [mailingPrefStatus, setMailingPrefStatus] = useState<string | null>(null)
   const [mailingPrefDraft, setMailingPrefDraft] = useState<number[]>([])
   const [copiedId, setCopiedId] = useState<number | null>(null)
+  const [dashSpotlightTeam, setDashSpotlightTeam] = useState<string>('')
   // Collapse competitions list by default when locked (spotlight section is the main view)
   const [showComps, setShowComps] = useState(!competitionLocked)
 
@@ -168,6 +169,40 @@ export default function DashboardPage() {
       .sort((a: any, b: any) => a.position - b.position)
       .map((t: any) => t.teamName)
   })()
+
+  // Auto-select most divisive team for dashboard spotlight
+  useEffect(() => {
+    if (aflTeams.length === 0 || (spotlightPredictions as MemberPrediction[]).length === 0 || dashSpotlightTeam) return
+    let highestVariance = -1
+    let bestTeam = aflTeams[0]
+    for (const team of aflTeams) {
+      const positions = (spotlightPredictions as MemberPrediction[]).map(mp => mp.ladder.indexOf(team) + 1)
+      const mean = positions.reduce((a, b) => a + b, 0) / positions.length
+      const variance = positions.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / positions.length
+      if (variance > highestVariance) { highestVariance = variance; bestTeam = team }
+    }
+    setDashSpotlightTeam(bestTeam)
+  }, [aflTeams, spotlightPredictions, dashSpotlightTeam])
+
+  const dashSpotlightRows = useMemo(() => {
+    if (!dashSpotlightTeam || aflTeams.length === 0 || (spotlightPredictions as MemberPrediction[]).length === 0) return []
+    const actualPos = aflTeams.indexOf(dashSpotlightTeam) + 1
+    return (spotlightPredictions as MemberPrediction[])
+      .map(mp => {
+        const predictedPos = mp.ladder.indexOf(dashSpotlightTeam) + 1
+        const error = Math.abs(predictedPos - actualPos)
+        const lbIdx = (spotlightLeaderboard as LeaderboardEntry[]).findIndex(l => l.userId === mp.userId)
+        return {
+          userId: mp.userId,
+          displayName: mp.displayName,
+          predictedPos,
+          actualPos,
+          error,
+          totalPoints: lbIdx >= 0 ? (spotlightLeaderboard as LeaderboardEntry[])[lbIdx].totalPoints : null,
+        }
+      })
+      .sort((a, b) => a.predictedPos - b.predictedPos)
+  }, [dashSpotlightTeam, aflTeams, spotlightPredictions, spotlightLeaderboard])
 
   // Accept invite mutation
   const acceptInviteMutation = useMutation({
@@ -1085,6 +1120,82 @@ export default function DashboardPage() {
                 </div>
               )}
             </div>
+
+            {/* Team Spotlight */}
+            {aflTeams.length > 0 && (spotlightPredictions as MemberPrediction[]).length > 0 && (
+              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2 flex-wrap">
+                  <span className="text-base">🔍</span>
+                  <h3 className="font-bold text-slate-900 text-sm">Team Spotlight</h3>
+                  <span className="text-xs text-slate-400">· where did everyone place them?</span>
+                </div>
+
+                {/* Team picker */}
+                <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap gap-2">
+                  {aflTeams.map(team => (
+                    <button
+                      key={team}
+                      onClick={() => setDashSpotlightTeam(team)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                        dashSpotlightTeam === team
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {team}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Spotlight rows */}
+                <div className="divide-y divide-slate-50">
+                  <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 px-5 py-2 bg-slate-50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    <span>Member</span>
+                    <span className="text-right w-20">Predicted</span>
+                    <span className="text-right w-14">Actual</span>
+                    <span className="text-right w-10">Diff</span>
+                  </div>
+                  {dashSpotlightRows.map(row => {
+                    const isMe = row.userId === user?.id
+                    const diffColor =
+                      row.error === 0 ? 'text-emerald-600 bg-emerald-50' :
+                      row.error <= 2  ? 'text-amber-600 bg-amber-50' :
+                      row.error <= 5  ? 'text-orange-600 bg-orange-50' :
+                                        'text-red-600 bg-red-50'
+                    return (
+                      <div
+                        key={row.userId}
+                        className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-3 px-5 py-2.5 items-center ${isMe ? 'bg-emerald-50/60' : 'hover:bg-slate-50'}`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <button
+                            onClick={() => navigate(`/ladder/${row.userId}`)}
+                            className="text-sm font-semibold text-slate-900 hover:text-emerald-700 truncate transition-colors text-left"
+                          >
+                            {row.displayName}
+                          </button>
+                          {isMe && <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>}
+                        </div>
+                        <div className="text-right w-20">
+                          <span className="text-base font-black text-slate-900">#{row.predictedPos}</span>
+                        </div>
+                        <div className="text-right w-14">
+                          <span className="text-sm font-semibold text-slate-500">#{row.actualPos}</span>
+                        </div>
+                        <div className="text-right w-10">
+                          <span className={`inline-flex items-center justify-center w-8 h-7 rounded-lg text-xs font-black ${diffColor}`}>
+                            {row.error === 0 ? '✓' : `±${row.error}`}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 text-xs text-slate-400 text-center">
+                  Predicted vs current AFL position · ✓ = exact match · auto-selected most divisive team
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
