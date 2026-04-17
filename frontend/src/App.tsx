@@ -21,6 +21,7 @@ import FantasyCompetitionPage from './pages/FantasyCompetitionPage'
 import FantasyTeamPage from './pages/FantasyTeamPage'
 import FantasyLeaderboardPage from './pages/FantasyLeaderboardPage'
 import FantasyInviteAcceptPage from './pages/FantasyInviteAcceptPage'
+import SettingsPage from './pages/SettingsPage'
 import { FEATURE_FANTASY7_ENABLED } from './config'
 
 const queryClient = new QueryClient()
@@ -144,6 +145,14 @@ function App() {
               />
             </>
           )}
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/" element={<Navigate to="/dashboard" />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

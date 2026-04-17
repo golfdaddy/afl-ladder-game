@@ -65,11 +65,6 @@ interface MemberPrediction {
   ladder: string[]
 }
 
-interface EmailPreferenceGroup {
-  id: number
-  name: string
-  description: string | null
-}
 
 export default function DashboardPage() {
   const user = useAuthStore((state) => state.user)
@@ -85,8 +80,6 @@ export default function DashboardPage() {
   const [joinCode, setJoinCode] = useState('')
   const [createError, setCreateError] = useState('')
   const [joinError, setJoinError] = useState('')
-  const [mailingPrefStatus, setMailingPrefStatus] = useState<string | null>(null)
-  const [mailingPrefDraft, setMailingPrefDraft] = useState<number[]>([])
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [dashSpotlightTeam, setDashSpotlightTeam] = useState<string>('')
   // Collapse competitions list by default when locked (spotlight section is the main view)
@@ -113,23 +106,6 @@ export default function DashboardPage() {
       return response.data.invites || []
     }
   })
-
-  // User email-list preferences
-  const { data: emailPreferences, isLoading: emailPreferencesLoading } = useQuery({
-    queryKey: ['email-preferences'],
-    queryFn: async () => {
-      const response = await api.get('/auth/email-preferences')
-      return response.data as {
-        groups: EmailPreferenceGroup[]
-        subscribedGroupIds: number[]
-      }
-    }
-  })
-
-  useEffect(() => {
-    if (!emailPreferences) return
-    setMailingPrefDraft(emailPreferences.subscribedGroupIds || [])
-  }, [emailPreferences])
 
   // First competition (for the locked dashboard spotlight)
   const firstComp = (competitions as Competition[])[0]
@@ -272,18 +248,6 @@ export default function DashboardPage() {
     }
   })
 
-  const updateEmailPreferencesMutation = useMutation({
-    mutationFn: (groupIds: number[]) =>
-      api.put('/auth/email-preferences', { groupIds }),
-    onSuccess: (response) => {
-      queryClient.setQueryData(['email-preferences'], response.data)
-      setMailingPrefStatus('✅ Email preferences saved')
-    },
-    onError: (err: any) => {
-      setMailingPrefStatus(`❌ ${err.response?.data?.error || 'Failed to save preferences'}`)
-    },
-  })
-
   const handleLogout = () => {
     logout()
     navigate('/login')
@@ -324,22 +288,6 @@ export default function DashboardPage() {
     setCreateError('')
     setJoinError('')
   }
-
-  const setMailingListPreference = (groupId: number, subscribe: boolean) => {
-    setMailingPrefStatus(null)
-    setMailingPrefDraft((prev) => {
-      if (subscribe) return Array.from(new Set([...prev, groupId]))
-      return prev.filter((id) => id !== groupId)
-    })
-  }
-
-  const saveMailingPreferences = () => {
-    setMailingPrefStatus(null)
-    updateEmailPreferencesMutation.mutate(mailingPrefDraft)
-  }
-
-  const mailingGroups = emailPreferences?.groups || []
-  const mailingSelection = new Set(mailingPrefDraft)
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -586,74 +534,20 @@ export default function DashboardPage() {
             <span className="font-bold text-slate-900 text-sm">Leaderboard</span>
             <span className="text-xs text-slate-400 mt-0.5">Global rankings</span>
           </button>
-        </div>
 
-        <div className="mb-8 bg-white rounded-2xl border border-slate-200 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Mailing Lists</h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Choose which update lists you receive. Admin campaigns can target any/all lists and send once per user.
-              </p>
+          <button
+            onClick={() => navigate('/settings')}
+            className="flex flex-col items-center justify-center p-5 rounded-2xl border-2 border-slate-200 bg-white hover:border-slate-400 hover:bg-slate-50 transition-all"
+          >
+            <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center mb-2">
+              <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
             </div>
-            <button
-              onClick={saveMailingPreferences}
-              disabled={updateEmailPreferencesMutation.isPending || emailPreferencesLoading}
-              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold disabled:opacity-50"
-            >
-              {updateEmailPreferencesMutation.isPending ? 'Saving…' : 'Save Preferences'}
-            </button>
-          </div>
-
-          {emailPreferencesLoading ? (
-            <p className="mt-4 text-sm text-slate-500">Loading mailing lists…</p>
-          ) : mailingGroups.length === 0 ? (
-            <p className="mt-4 text-sm text-slate-500">No mailing lists available.</p>
-          ) : (
-            <div className="mt-4 divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden">
-              {mailingGroups.map((group) => {
-                const subscribed = mailingSelection.has(group.id)
-                return (
-                  <div key={group.id} className="px-4 py-3 bg-slate-50/50 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-800">{group.name}</p>
-                      {group.description && (
-                        <p className="text-xs text-slate-500 mt-0.5">{group.description}</p>
-                      )}
-                    </div>
-                    <div className="inline-flex rounded-lg border border-slate-200 bg-white overflow-hidden">
-                      <label className={`px-3 py-1.5 text-xs font-semibold cursor-pointer ${subscribed ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500'}`}>
-                        <input
-                          type="radio"
-                          name={`mailing-group-${group.id}`}
-                          className="sr-only"
-                          checked={subscribed}
-                          onChange={() => setMailingListPreference(group.id, true)}
-                        />
-                        Subscribed
-                      </label>
-                      <label className={`px-3 py-1.5 text-xs font-semibold cursor-pointer border-l border-slate-200 ${!subscribed ? 'bg-slate-100 text-slate-700' : 'text-slate-500'}`}>
-                        <input
-                          type="radio"
-                          name={`mailing-group-${group.id}`}
-                          className="sr-only"
-                          checked={!subscribed}
-                          onChange={() => setMailingListPreference(group.id, false)}
-                        />
-                        Off
-                      </label>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {mailingPrefStatus && (
-            <p className={`mt-3 text-sm font-medium ${mailingPrefStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
-              {mailingPrefStatus}
-            </p>
-          )}
+            <span className="font-bold text-slate-900 text-sm">Settings</span>
+            <span className="text-xs text-slate-400 mt-0.5">Email & account</span>
+          </button>
         </div>
 
         {/* Create Panel */}
