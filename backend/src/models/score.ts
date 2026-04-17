@@ -178,7 +178,7 @@ export class ScoreModel {
            p.user_id,
            SUM(ABS(pt.position - lp.position)) AS total_points
          FROM predictions p
-         JOIN prediction_teams pt ON pt.prediction_id = p.id
+         JOIN predicted_teams pt ON pt.prediction_id = p.id
          JOIN ladder_positions lp ON lp.team_name = pt.team_name
          WHERE p.season_id = $1
          GROUP BY p.user_id
