@@ -897,20 +897,30 @@ export default function CompetitionPage() {
                             const rowBg = allSame ? 'bg-slate-50/60' : isKeyTeam ? 'bg-amber-50/40' : ''
 
                             return (
-                              <tr key={team} className={`border-b border-slate-50 cursor-pointer hover:bg-slate-100/50 transition-colors ${rowBg}`} onClick={() => { setSelectedTeam(team); setLadderView('spotlight') }}>
+                              <tr key={team} className={`border-b border-slate-100 cursor-pointer hover:brightness-95 transition-all ${rowBg}`} onClick={() => { setSelectedTeam(team); setLadderView('spotlight') }}>
                                 {/* Sticky AFL column */}
-                                <td className={`sticky left-0 z-10 bg-white h-12 px-2 ${allSame ? 'bg-slate-50/60' : ''}`} style={{ boxShadow: '3px 0 8px -3px rgba(0,0,0,0.1)' }}>
-                                  <div className={`flex items-center gap-2 ${allSame ? 'opacity-40' : ''}`}>
+                                <td
+                                  className={`sticky left-0 z-10 h-12 px-2 ${allSame ? 'opacity-50' : ''}`}
+                                  style={{
+                                    boxShadow: '3px 0 8px -3px rgba(0,0,0,0.12)',
+                                    backgroundColor: allSame ? '#f8fafc' : `${meta.primaryColor}12`,
+                                    borderLeft: `4px solid ${meta.primaryColor}`,
+                                  }}
+                                >
+                                  <div className="flex items-center gap-2">
                                     <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-black flex-shrink-0 ${posBadgeClass(i)}`}>{i + 1}</span>
+                                    {/* Two-tone badge: primary bg, secondary accent bottom strip */}
                                     <div
-                                      className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black shadow-sm flex-shrink-0"
-                                      style={{
-                                        backgroundColor: meta.primaryColor,
-                                        color: meta.textColor,
-                                        border: meta.primaryColor === '#000000' ? '1px solid #333' : 'none',
-                                      }}
+                                      className="w-9 h-9 rounded-xl flex flex-col overflow-hidden shadow-sm flex-shrink-0"
+                                      style={{ border: `1.5px solid ${meta.secondaryColor}40` }}
                                     >
-                                      {meta.shortName}
+                                      <div
+                                        className="flex-1 flex items-center justify-center text-[9px] font-black"
+                                        style={{ backgroundColor: meta.primaryColor, color: meta.textColor }}
+                                      >
+                                        {meta.shortName}
+                                      </div>
+                                      <div className="h-1.5" style={{ backgroundColor: meta.secondaryColor }} />
                                     </div>
                                     <div className="min-w-0 hidden sm:block">
                                       <div className="flex items-center gap-1.5">
