@@ -8,6 +8,7 @@ import {
   classifyTeam, getScoreForMember, totalForMember,
 } from '../utils/aflTeams'
 import FullSeasonSimulator from '../components/FullSeasonSimulator'
+import FinalsPredictor from '../components/FinalsPredictor'
 import { SEASON_OVER, FEATURE_FANTASY7_ENABLED } from '../config'
 import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
@@ -84,7 +85,7 @@ export default function DashboardPage() {
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [dashSpotlightTeam, setDashSpotlightTeam] = useState<string>('')
   const [dashView, setDashView] = useState<'compare' | 'spotlight' | 'leaderboard' | 'predictor'>('compare')
-  const [dashPredictorMode, setDashPredictorMode] = useState<'auto' | 'games'>('auto')
+  const [dashPredictorMode, setDashPredictorMode] = useState<'auto' | 'games' | 'finals'>('auto')
   const [dashSelectedModel, setDashSelectedModel] = useState<string>('consensus')
   // Collapse competitions list by default when locked (spotlight section is the main view)
   const [showComps, setShowComps] = useState(!competitionLocked)
@@ -1277,6 +1278,13 @@ export default function DashboardPage() {
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
                             Game Picks
                           </button>
+                          <button
+                            onClick={() => setDashPredictorMode('finals')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${dashPredictorMode === 'finals' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3l14 9-14 9V3z" /></svg>
+                            Finals Predictor
+                          </button>
                         </div>
                         {dashPredictorMode === 'auto' && dashAvailableModels.length > 0 && (
                           <div className="flex items-center gap-2">
@@ -1300,6 +1308,15 @@ export default function DashboardPage() {
                         <FullSeasonSimulator
                           seasonYear={seasonYear}
                           aflLadderData={aflLadderData}
+                          predictions={spotlightPredictions as MemberPrediction[]}
+                          currentUserId={user?.id ?? null}
+                        />
+                      )}
+
+                      {/* ── FINALS PREDICTOR MODE ── */}
+                      {dashPredictorMode === 'finals' && (
+                        <FinalsPredictor
+                          consensusLadder={dashConsensusData}
                           predictions={spotlightPredictions as MemberPrediction[]}
                           currentUserId={user?.id ?? null}
                         />

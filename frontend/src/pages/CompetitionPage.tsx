@@ -5,6 +5,7 @@ import api from '../services/api'
 import { useAuthStore } from '../store/auth'
 import { useCurrentSeason } from '../hooks/useCurrentSeason'
 import FullSeasonSimulator from '../components/FullSeasonSimulator'
+import FinalsPredictor from '../components/FinalsPredictor'
 
 interface LeaderboardEntry {
   userId: number
@@ -293,7 +294,7 @@ export default function CompetitionPage() {
   const [copySuccess, setCopySuccess] = useState(false)
   const [ladderView, setLadderView] = useState<'ladder' | 'spotlight' | 'compare' | 'predictor'>('compare')
   const [selectedTeam, setSelectedTeam] = useState<string>('')
-  const [predictorMode, setPredictorMode] = useState<'auto' | 'games'>('auto')
+  const [predictorMode, setPredictorMode] = useState<'auto' | 'games' | 'finals'>('auto')
   const [selectedModel, setSelectedModel] = useState<string>('consensus')
 
   const { data: compData, isLoading: compLoading } = useQuery({
@@ -1419,6 +1420,15 @@ export default function CompetitionPage() {
                           </svg>
                           Game Picks
                         </button>
+                        <button
+                          onClick={() => setPredictorMode('finals')}
+                          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${predictorMode === 'finals' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3l14 9-14 9V3z" />
+                          </svg>
+                          Finals Predictor
+                        </button>
                       </div>
                       {predictorMode === 'auto' && availableModels.length > 0 && (
                         <div className="flex items-center gap-2">
@@ -1442,6 +1452,15 @@ export default function CompetitionPage() {
                       <FullSeasonSimulator
                         seasonYear={seasonYear}
                         aflLadderData={aflLadderData}
+                        predictions={memberPredictions}
+                        currentUserId={currentUser?.id ?? null}
+                      />
+                    )}
+
+                    {/* ── FINALS PREDICTOR MODE ── */}
+                    {predictorMode === 'finals' && (
+                      <FinalsPredictor
+                        consensusLadder={consensusData}
                         predictions={memberPredictions}
                         currentUserId={currentUser?.id ?? null}
                       />
