@@ -1,12 +1,23 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
-import {
-  getTeamMeta, zoneConfig, getZone, posBadgeClass, ptsColorClass,
-  classifyTeam, getScoreForMember, totalForMember,
-} from '../utils/aflTeams'
 import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 interface LeaderboardEntry {
@@ -51,17 +62,97 @@ interface MemberPrediction {
   ladder: string[]
 }
 
-// ── AFL Team Colours & Helpers (matching PredictionPage) ─────────────────────
+// ── AFL Team Colours & Helpers ────────────────────────────────────────────────
 
+interface AFLTeamMeta {
+  name: string
+  shortName: string
+  primaryColor: string
+  secondaryColor: string
+  textColor: string
+}
+
+const AFL_TEAM_META: AFLTeamMeta[] = [
+  { name: 'Melbourne',        shortName: 'MEL', primaryColor: '#041E42', secondaryColor: '#CC2031', textColor: '#FFFFFF' },
+  { name: 'St Kilda',         shortName: 'STK', primaryColor: '#000000', secondaryColor: '#ED1C24', textColor: '#FFFFFF' },
+  { name: 'Collingwood',      shortName: 'COL', primaryColor: '#000000', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'Brisbane Lions',   shortName: 'BRL', primaryColor: '#69003B', secondaryColor: '#0055A3', textColor: '#FFFFFF' },
+  { name: 'Port Adelaide',    shortName: 'PTA', primaryColor: '#008AAB', secondaryColor: '#000000', textColor: '#FFFFFF' },
+  { name: 'Carlton',          shortName: 'CAR', primaryColor: '#001B2A', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'North Melbourne',  shortName: 'NTH', primaryColor: '#003C71', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'GWS Giants',       shortName: 'GWS', primaryColor: '#F15C22', secondaryColor: '#4A4F55', textColor: '#FFFFFF' },
+  { name: 'Richmond',         shortName: 'RIC', primaryColor: '#000000', secondaryColor: '#FED102', textColor: '#FED102' },
+  { name: 'Fremantle',        shortName: 'FRE', primaryColor: '#2E0854', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'Essendon',         shortName: 'ESS', primaryColor: '#000000', secondaryColor: '#CC2031', textColor: '#CC2031' },
+  { name: 'Adelaide Crows',   shortName: 'ADE', primaryColor: '#002654', secondaryColor: '#E21E31', textColor: '#FFD200' },
+  { name: 'Gold Coast Suns',  shortName: 'GCS', primaryColor: '#CF2032', secondaryColor: '#F4B223', textColor: '#FFFFFF' },
+  { name: 'Geelong',          shortName: 'GEE', primaryColor: '#001F3D', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'Hawthorn',         shortName: 'HAW', primaryColor: '#4D2004', secondaryColor: '#FBBF15', textColor: '#FBBF15' },
+  { name: 'Sydney Swans',     shortName: 'SYD', primaryColor: '#ED171F', secondaryColor: '#FFFFFF', textColor: '#FFFFFF' },
+  { name: 'West Coast Eagles',shortName: 'WCE', primaryColor: '#002B5C', secondaryColor: '#F2A900', textColor: '#F2A900' },
+  { name: 'Western Bulldogs', shortName: 'WBD', primaryColor: '#014896', secondaryColor: '#E1251B', textColor: '#FFFFFF' },
+]
+
+const getTeamMeta = (name: string): AFLTeamMeta =>
+  AFL_TEAM_META.find((t) => t.name === name) ?? {
+    name,
+    shortName: name.slice(0, 3).toUpperCase(),
+    primaryColor: '#334155',
+    secondaryColor: '#ffffff',
+    textColor: '#ffffff',
+  }
+
+const zoneConfig = [
+  { label: 'Top 4',  positions: '1-4',   range: [0, 3],  text: 'text-emerald-600', dot: 'bg-emerald-500' },
+  { label: 'Finals', positions: '5-10',  range: [4, 9],  text: 'text-blue-600',    dot: 'bg-blue-500'   },
+  { label: 'Mid',    positions: '11-14', range: [10, 13],text: 'text-slate-500',   dot: 'bg-slate-400'  },
+  { label: 'Bottom', positions: '15-18', range: [14, 17],text: 'text-red-500',     dot: 'bg-red-500'    },
+]
+const getZone = (i: number) => zoneConfig.find((z) => i >= z.range[0] && i <= z.range[1])!
+
+function posBadgeClass(i: number) {
+  if (i < 4)              return 'bg-emerald-500 text-white'
+  if (i >= 4 && i < 10)  return 'bg-blue-100 text-blue-700'
+  if (i >= 10 && i < 14) return 'bg-slate-100 text-slate-600'
+  return 'bg-red-100 text-red-600'
+}
+
+function ptsColorClass(pts: number | null) {
+  if (pts === 0) return 'text-emerald-500'
+  if (pts !== null && pts <= 2) return 'text-emerald-600'
+  if (pts !== null && pts <= 4) return 'text-amber-500'
+  return 'text-red-500'
+}
+
+function classifyTeam(teamName: string, memberPredictions: MemberPrediction[]) {
+  const positions = memberPredictions.map(m => m.ladder.indexOf(teamName) + 1)
+  const allSame = positions.every(p => p === positions[0])
+  const spread = Math.max(...positions) - Math.min(...positions)
+  const isKeyTeam = spread >= 3
+  return { allSame, isKeyTeam, spread }
+}
+
+function getScoreForMember(member: MemberPrediction, teamName: string, aflTeams: string[]) {
+  const actualPos = aflTeams.indexOf(teamName) + 1
+  const predIdx = member.ladder.indexOf(teamName)
+  const predictedPos = predIdx >= 0 ? predIdx + 1 : null
+  const diff = predictedPos !== null ? predictedPos - actualPos : null
+  const points = diff !== null ? Math.abs(diff) : null
+  return { predictedPos, diff, points }
+}
+
+function totalForMember(member: MemberPrediction, aflTeams: string[]) {
+  return aflTeams.reduce((sum, team) => sum + (getScoreForMember(member, team, aflTeams).points || 0), 0)
+}
 
 function ScoreDiffBadge({ diff, points }: { diff: number | null; points: number | null }) {
   if (diff === null || points === null) {
-    return <span className="text-xs text-slate-300 font-mono w-12 text-center">—</span>
+    return <span className="text-xs text-slate-300 font-mono w-12 text-center">--</span>
   }
   if (diff === 0) {
     return (
       <span className="inline-flex items-center justify-center w-12 text-xs font-bold text-emerald-600">
-        ✓ 0
+        ok 0
       </span>
     )
   }
@@ -108,6 +199,71 @@ const RankBadge = ({ rank }: { rank: number }) => {
   )
 }
 
+// ── Predictor: draggable team row ─────────────────────────────────────────────
+
+function SortableTeamRow({ team, index }: { team: string; index: number }) {
+  const meta = getTeamMeta(team)
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: team })
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 50 : undefined,
+    position: 'relative',
+  }
+
+  const zone = getZone(index)
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-3 px-4 py-2.5 border-b border-slate-100 bg-white select-none ${isDragging ? 'shadow-lg rounded-xl' : ''}`}
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing flex-shrink-0 touch-none p-1"
+        aria-label="Drag to reorder"
+      >
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+          <circle cx="7" cy="5" r="1.5" />
+          <circle cx="13" cy="5" r="1.5" />
+          <circle cx="7" cy="10" r="1.5" />
+          <circle cx="13" cy="10" r="1.5" />
+          <circle cx="7" cy="15" r="1.5" />
+          <circle cx="13" cy="15" r="1.5" />
+        </svg>
+      </button>
+      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-lg text-xs font-black flex-shrink-0 ${posBadgeClass(index)}`}>
+        {index + 1}
+      </span>
+      <div
+        className="w-9 h-9 rounded-xl flex flex-col overflow-hidden shadow-sm flex-shrink-0"
+        style={{ border: `1.5px solid ${meta.secondaryColor}40` }}
+      >
+        <div
+          className="flex-1 flex items-center justify-center text-[9px] font-black"
+          style={{ backgroundColor: meta.primaryColor, color: meta.textColor }}
+        >
+          {meta.shortName}
+        </div>
+        <div className="h-1.5" style={{ backgroundColor: meta.secondaryColor }} />
+      </div>
+      <span className="flex-1 text-sm font-semibold text-slate-900 leading-tight truncate">{team}</span>
+      <span className={`text-xs font-semibold flex-shrink-0 ${zone.text}`}>{zone.label}</span>
+    </div>
+  )
+}
+
 export default function CompetitionPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -118,10 +274,14 @@ export default function CompetitionPage() {
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [inviteError, setInviteError] = useState('')
   const [copySuccess, setCopySuccess] = useState(false)
-  const [ladderView, setLadderView] = useState<'ladder' | 'spotlight' | 'compare'>('compare')
+  const [ladderView, setLadderView] = useState<'ladder' | 'spotlight' | 'compare' | 'predictor'>('compare')
   const [selectedTeam, setSelectedTeam] = useState<string>('')
+  const [simulatedLadder, setSimulatedLadder] = useState<string[]>([])
 
-  // Fetch competition details
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  )
+
   const { data: compData, isLoading: compLoading } = useQuery({
     queryKey: ['competition', id],
     queryFn: async () => {
@@ -130,7 +290,6 @@ export default function CompetitionPage() {
     }
   })
 
-  // Fetch competition leaderboard
   const { data: leaderboardData, isLoading: leaderboardLoading } = useQuery({
     queryKey: ['leaderboard', 'competition', id],
     queryFn: async () => {
@@ -139,7 +298,6 @@ export default function CompetitionPage() {
     }
   })
 
-  // Fetch all member predictions (only when locked — reveals everyone's submission)
   const { data: memberPredictionsData } = useQuery({
     queryKey: ['competition', id, 'predictions'],
     queryFn: async () => {
@@ -149,7 +307,6 @@ export default function CompetitionPage() {
     enabled: competitionLocked,
   })
 
-  // Fetch current AFL ladder for side-by-side comparison
   const { data: aflLadderData } = useQuery({
     queryKey: ['afl-ladder', seasonId],
     queryFn: async () => {
@@ -160,7 +317,6 @@ export default function CompetitionPage() {
     retry: false,
   })
 
-  // Send invite mutation
   const inviteMutation = useMutation({
     mutationFn: (email: string) =>
       api.post(`/competitions/${id}/invite`, { email }),
@@ -183,7 +339,6 @@ export default function CompetitionPage() {
   const leaderboard: LeaderboardEntry[] = leaderboardData || []
   const memberPredictions: MemberPrediction[] = memberPredictionsData || []
 
-  // AFL current ladder — sorted by position ascending → array of team names
   const aflTeams: string[] = (() => {
     const teams = aflLadderData?.ladder?.teams
     if (!Array.isArray(teams) || teams.length === 0) return []
@@ -192,7 +347,12 @@ export default function CompetitionPage() {
       .map((t: any) => t.teamName)
   })()
 
-  // Auto-select the team with the highest positional variance when data loads
+  useEffect(() => {
+    if (aflTeams.length > 0 && simulatedLadder.length === 0) {
+      setSimulatedLadder([...aflTeams])
+    }
+  }, [aflTeams, simulatedLadder.length])
+
   useEffect(() => {
     if (aflTeams.length === 0 || memberPredictions.length === 0 || selectedTeam) return
     let highestVariance = -1
@@ -206,7 +366,6 @@ export default function CompetitionPage() {
     setSelectedTeam(bestTeam)
   }, [aflTeams, memberPredictions, selectedTeam])
 
-  // Per-team spotlight: each member's predicted vs actual position
   const spotlightRows = useMemo(() => {
     if (!selectedTeam || aflTeams.length === 0 || memberPredictions.length === 0) return []
     const actualPos = aflTeams.indexOf(selectedTeam) + 1
@@ -228,12 +387,10 @@ export default function CompetitionPage() {
       .sort((a, b) => a.predictedPos - b.predictedPos)
   }, [selectedTeam, aflTeams, memberPredictions, leaderboard])
 
-  // Current user's score breakdown — AFL ladder with predicted position & points per team
   const myScoreRows = useMemo(() => {
     if (aflTeams.length === 0 || memberPredictions.length === 0 || !currentUser) return []
     const myPrediction = memberPredictions.find(mp => mp.userId === currentUser.id)
     if (!myPrediction) return []
-
     return aflTeams.map((teamName, i) => {
       const actualPos = i + 1
       const predIdx = myPrediction.ladder.indexOf(teamName)
@@ -256,7 +413,18 @@ export default function CompetitionPage() {
     return idx >= 0 ? idx + 1 : null
   }, [leaderboard, currentUser])
 
-  // Sorted members for league compare: current user first, then by total score
+  const simulatedLeaderboard = useMemo(() => {
+    if (simulatedLadder.length === 0 || memberPredictions.length === 0) return []
+    return [...memberPredictions]
+      .map((mp) => ({
+        userId: mp.userId,
+        displayName: mp.displayName,
+        simScore: totalForMember(mp, simulatedLadder),
+        realScore: totalForMember(mp, aflTeams),
+      }))
+      .sort((a, b) => a.simScore - b.simScore)
+  }, [simulatedLadder, memberPredictions, aflTeams])
+
   const sortedPredictions = useMemo(() => {
     if (aflTeams.length === 0 || memberPredictions.length === 0) return []
     return [...memberPredictions].sort((a, b) => {
@@ -287,6 +455,17 @@ export default function CompetitionPage() {
     if (!dateStr) return ''
     const d = new Date(dateStr)
     return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (over && active.id !== over.id) {
+      setSimulatedLadder((prev) => {
+        const oldIndex = prev.indexOf(active.id as string)
+        const newIndex = prev.indexOf(over.id as string)
+        return arrayMove(prev, oldIndex, newIndex)
+      })
+    }
   }
 
   if (compLoading) {
@@ -332,7 +511,6 @@ export default function CompetitionPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Dark header */}
       <div className="bg-slate-900">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-8">
           <div className="flex justify-between items-start">
@@ -357,8 +535,6 @@ export default function CompetitionPage() {
               {competition.isPublic ? 'Public' : 'Private'}
             </span>
           </div>
-
-          {/* Header stats strip */}
           <div className="mt-6 flex gap-6">
             <div>
               <p className="text-2xl font-black text-white">{members.length}</p>
@@ -384,8 +560,6 @@ export default function CompetitionPage() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 mb-6">
-
-          {/* Invite Friends Card */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6">
             <div className="flex items-center gap-2 mb-5">
               <div className="w-8 h-8 bg-emerald-100 rounded-xl flex items-center justify-center">
@@ -395,8 +569,6 @@ export default function CompetitionPage() {
               </div>
               <h3 className="text-base font-bold text-slate-900">Invite Friends</h3>
             </div>
-
-            {/* Email Invite */}
             <form onSubmit={handleSendInvite} className="mb-5">
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
                 Send email invite
@@ -425,15 +597,9 @@ export default function CompetitionPage() {
                   ) : 'Send'}
                 </button>
               </div>
-              {inviteError && (
-                <p className="mt-2 text-xs text-red-600">{inviteError}</p>
-              )}
-              {inviteSuccess && (
-                <p className="mt-2 text-xs text-emerald-600 font-medium">{inviteSuccess}</p>
-              )}
+              {inviteError && <p className="mt-2 text-xs text-red-600">{inviteError}</p>}
+              {inviteSuccess && <p className="mt-2 text-xs text-emerald-600 font-medium">{inviteSuccess}</p>}
             </form>
-
-            {/* Divider */}
             <div className="relative my-4">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-slate-100" />
@@ -442,19 +608,13 @@ export default function CompetitionPage() {
                 <span className="px-3 bg-white text-xs text-slate-400 uppercase tracking-wider font-semibold">or share code</span>
               </div>
             </div>
-
-            {/* Join Code */}
             <div className="flex gap-2">
               <div className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-lg tracking-[0.25em] text-center text-slate-900 font-bold">
                 {competition.joinCode}
               </div>
               <button
                 onClick={handleCopyCode}
-                className={`px-4 py-2.5 rounded-xl font-bold text-sm transition-colors ${
-                  copySuccess
-                    ? 'bg-emerald-500 text-white'
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                }`}
+                className={`px-4 py-2.5 rounded-xl font-bold text-sm transition-colors ${copySuccess ? 'bg-emerald-500 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
               >
                 {copySuccess ? (
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -465,7 +625,6 @@ export default function CompetitionPage() {
             </div>
           </div>
 
-          {/* Stats Card */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6">
             <div className="flex items-center gap-2 mb-5">
               <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center">
@@ -505,7 +664,6 @@ export default function CompetitionPage() {
             </div>
           </div>
 
-          {/* Your Prediction Card */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6">
             <div className="flex items-center gap-2 mb-5">
               <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center">
@@ -515,7 +673,6 @@ export default function CompetitionPage() {
               </div>
               <h3 className="text-base font-bold text-slate-900">Your Prediction</h3>
             </div>
-
             {!me ? (
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 bg-slate-200 rounded-full animate-pulse" />
@@ -525,16 +682,16 @@ export default function CompetitionPage() {
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full" />
-                  <span className="text-sm font-semibold text-emerald-700">Prediction submitted ✓</span>
+                  <span className="text-sm font-semibold text-emerald-700">Prediction submitted</span>
                 </div>
                 <p className="text-xs text-slate-400 mb-5">
-                  {competitionLocked ? 'Competition is locked — view only' : `Last updated: ${formatDate(me.predictionUpdatedAt)}`}
+                  {competitionLocked ? 'Competition is locked -- view only' : `Last updated: ${formatDate(me.predictionUpdatedAt)}`}
                 </p>
                 <button
                   onClick={() => navigate(`/prediction/${seasonId}`)}
                   className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors"
                 >
-                  {competitionLocked ? '👁 View My Ladder' : 'View / Edit Prediction'}
+                  {competitionLocked ? 'View My Ladder' : 'View / Edit Prediction'}
                 </button>
               </div>
             ) : competitionLocked ? (
@@ -553,9 +710,7 @@ export default function CompetitionPage() {
                   <div className="w-2.5 h-2.5 bg-amber-400 rounded-full animate-pulse" />
                   <span className="text-sm font-semibold text-amber-700">Not yet submitted</span>
                 </div>
-                <p className="text-xs text-slate-400 mb-5">
-                  Submit before the March 10 cutoff!
-                </p>
+                <p className="text-xs text-slate-400 mb-5">Submit before the March 10 cutoff!</p>
                 <button
                   onClick={() => navigate(`/prediction/${seasonId}`)}
                   className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm transition-colors"
@@ -567,18 +722,16 @@ export default function CompetitionPage() {
           </div>
         </div>
 
-        {/* Members & Invites Table */}
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden mb-6">
           <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
             <div>
               <h2 className="text-lg font-bold text-slate-900">Members</h2>
               <p className="text-sm text-slate-500 mt-0.5">
                 {submittedCount} of {members.length} have submitted
-                {pendingInvites.length > 0 && ` · ${pendingInvites.length} invite${pendingInvites.length > 1 ? 's' : ''} pending`}
+                {pendingInvites.length > 0 && ` - ${pendingInvites.length} invite${pendingInvites.length > 1 ? 's' : ''} pending`}
               </p>
             </div>
           </div>
-
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -590,7 +743,6 @@ export default function CompetitionPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {/* Actual members */}
                 {members.map((member) => (
                   <tr
                     key={`member-${member.id}`}
@@ -624,12 +776,10 @@ export default function CompetitionPage() {
                       )}
                     </td>
                     <td className="px-6 py-4 text-right text-xs text-slate-400">
-                      {member.hasSubmitted ? formatDate(member.predictionUpdatedAt) : '—'}
+                      {member.hasSubmitted ? formatDate(member.predictionUpdatedAt) : '--'}
                     </td>
                   </tr>
                 ))}
-
-                {/* Pending invites */}
                 {pendingInvites.map((invite) => (
                   <tr key={`invite-${invite.id}`} className="bg-purple-50/30 hover:bg-purple-50/50 transition-colors">
                     <td className="px-6 py-4">
@@ -654,7 +804,6 @@ export default function CompetitionPage() {
                     </td>
                   </tr>
                 ))}
-
                 {members.length === 0 && pendingInvites.length === 0 && (
                   <tr>
                     <td colSpan={4} className="px-6 py-12 text-center text-slate-400 text-sm">
@@ -667,13 +816,11 @@ export default function CompetitionPage() {
           </div>
         </div>
 
-        {/* Leaderboard */}
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100">
             <h2 className="text-lg font-bold text-slate-900">Leaderboard</h2>
-            <p className="text-sm text-slate-500 mt-0.5">Scores update when the AFL ladder is refreshed · Lower is better</p>
+            <p className="text-sm text-slate-500 mt-0.5">Scores update when the AFL ladder is refreshed - Lower is better</p>
           </div>
-
           {leaderboardLoading ? (
             <div className="p-6 space-y-3">
               {[1,2,3].map(i => (
@@ -695,11 +842,7 @@ export default function CompetitionPage() {
               {leaderboard.map((entry, index) => (
                 <div
                   key={entry.userId}
-                  className={`flex items-center gap-4 px-6 py-4 transition-colors ${
-                    entry.userId === currentUser?.id
-                      ? 'bg-emerald-50/60'
-                      : 'hover:bg-slate-50'
-                  }`}
+                  className={`flex items-center gap-4 px-6 py-4 transition-colors ${entry.userId === currentUser?.id ? 'bg-emerald-50/60' : 'hover:bg-slate-50'}`}
                 >
                   <RankBadge rank={index + 1} />
                   <div className="flex-1 min-w-0">
@@ -723,28 +866,25 @@ export default function CompetitionPage() {
               ))}
             </div>
           )}
-
-          {/* Scoring note */}
           <div className="px-6 py-4 bg-slate-50 border-t border-slate-100">
             <p className="text-xs text-slate-400 text-center">
-              Lower score = better prediction · Each team scored by |predicted − actual| position
+              Lower score = better prediction - Each team scored by |predicted - actual| position
             </p>
           </div>
         </div>
 
-        {/* ── League Compare — directly below leaderboard ── */}
         {competitionLocked && (
           <div className="mt-6 bg-white rounded-2xl border border-slate-200 overflow-hidden">
-            {/* Header + tab switcher */}
-            <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-3">
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-3 flex-wrap">
               <div className="flex-1 min-w-0">
                 <h2 className="text-lg font-bold text-slate-900">
-                  {ladderView === 'compare' ? 'League Compare' : ladderView === 'ladder' ? 'My Score' : 'Team Spotlight'}
+                  {ladderView === 'compare' ? 'League Compare' : ladderView === 'ladder' ? 'My Score' : ladderView === 'spotlight' ? 'Team Spotlight' : 'Predictor'}
                 </h2>
                 <p className="text-sm text-slate-500 mt-0.5">
-                  {ladderView === 'compare' && 'AFL ladder vs everyone\u2019s predictions — tap a team for detail'}
-                  {ladderView === 'ladder' && 'AFL ladder vs your prediction — lower is better'}
+                  {ladderView === 'compare' && 'AFL ladder vs everyone\'s predictions - tap a team for detail'}
+                  {ladderView === 'ladder' && 'AFL ladder vs your prediction - lower is better'}
                   {ladderView === 'spotlight' && 'Select a team to see where everyone placed them'}
+                  {ladderView === 'predictor' && 'Drag teams to simulate a what-if ladder - see how scores change'}
                 </p>
               </div>
               <div className="flex-shrink-0 flex rounded-xl bg-slate-100 p-1 gap-1">
@@ -766,10 +906,15 @@ export default function CompetitionPage() {
                 >
                   Team Spotlight
                 </button>
+                <button
+                  onClick={() => setLadderView('predictor')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${ladderView === 'predictor' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  Predictor
+                </button>
               </div>
             </div>
 
-            {/* ── League Compare view ── */}
             {ladderView === 'compare' && (
               <div>
                 {aflTeams.length === 0 || sortedPredictions.length === 0 ? (
@@ -778,7 +923,6 @@ export default function CompetitionPage() {
                   </div>
                 ) : (
                   <>
-                    {/* Zone + key legend */}
                     <div className="px-5 py-2.5 border-b border-slate-100 flex gap-4 flex-wrap items-center">
                       {zoneConfig.map((z) => (
                         <div key={z.label} className="flex items-center gap-1.5">
@@ -788,8 +932,6 @@ export default function CompetitionPage() {
                         </div>
                       ))}
                     </div>
-
-                    {/* Scrollable comparison table */}
                     <div className="overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
                       <table className="w-full border-collapse" style={{ minWidth: '600px' }}>
                         <thead>
@@ -805,7 +947,7 @@ export default function CompetitionPage() {
                                   <span className="text-xs font-bold text-slate-900 block truncate">{mp.displayName}</span>
                                   <div className="flex items-center gap-1 mt-0.5">
                                     {isMe && <span className="text-[10px] font-semibold text-emerald-600">You</span>}
-                                    {isMe && <span className="text-[10px] text-slate-400">·</span>}
+                                    {isMe && <span className="text-[10px] text-slate-400">.</span>}
                                     <span className="text-[10px] text-slate-400 font-semibold">{total} pts</span>
                                   </div>
                                 </th>
@@ -819,10 +961,8 @@ export default function CompetitionPage() {
                             const zone = getZone(i)
                             const { allSame, isKeyTeam } = classifyTeam(team, sortedPredictions)
                             const rowBg = allSame ? 'bg-slate-50/60' : isKeyTeam ? 'bg-amber-50/40' : ''
-
                             return (
                               <tr key={team} className={`border-b border-slate-100 cursor-pointer hover:brightness-95 transition-all ${rowBg}`} onClick={() => { setSelectedTeam(team); setLadderView('spotlight') }}>
-                                {/* Sticky AFL column */}
                                 <td
                                   className={`sticky left-0 z-10 h-12 px-2 ${allSame ? 'opacity-50' : ''}`}
                                   style={{
@@ -833,15 +973,11 @@ export default function CompetitionPage() {
                                 >
                                   <div className="flex items-center gap-2">
                                     <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-black flex-shrink-0 ${posBadgeClass(i)}`}>{i + 1}</span>
-                                    {/* Two-tone badge: primary bg, secondary accent bottom strip */}
                                     <div
                                       className="w-9 h-9 rounded-xl flex flex-col overflow-hidden shadow-sm flex-shrink-0"
                                       style={{ border: `1.5px solid ${meta.secondaryColor}40` }}
                                     >
-                                      <div
-                                        className="flex-1 flex items-center justify-center text-[9px] font-black"
-                                        style={{ backgroundColor: meta.primaryColor, color: meta.textColor }}
-                                      >
+                                      <div className="flex-1 flex items-center justify-center text-[9px] font-black" style={{ backgroundColor: meta.primaryColor, color: meta.textColor }}>
                                         {meta.shortName}
                                       </div>
                                       <div className="h-1.5" style={{ backgroundColor: meta.secondaryColor }} />
@@ -855,13 +991,10 @@ export default function CompetitionPage() {
                                     </div>
                                   </div>
                                 </td>
-
-                                {/* Member cells */}
                                 {sortedPredictions.map((mp) => {
                                   const isMe = mp.userId === currentUser?.id
                                   const { predictedPos, diff, points } = getScoreForMember(mp, team, aflTeams)
                                   const pts = points ?? 0
-
                                   let cellContent
                                   if (allSame) {
                                     cellContent = <span className="text-[10px] text-slate-300">#{predictedPos}</span>
@@ -883,7 +1016,6 @@ export default function CompetitionPage() {
                                       </>
                                     )
                                   }
-
                                   const cellBg = allSame ? '' : pts === 0 ? 'bg-emerald-50/50' : isMe ? 'bg-emerald-50/20' : ''
                                   return (
                                     <td key={mp.userId} className={`h-12 text-center border-l border-slate-50 ${cellBg}`}>
@@ -915,75 +1047,50 @@ export default function CompetitionPage() {
                         </tfoot>
                       </table>
                     </div>
-
-                    {/* Footer */}
                     <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-5 flex-wrap text-xs text-slate-400">
-                      <span><span className="font-black text-emerald-500">#3</span> = correct position</span>
-                      <span className="text-slate-200">|</span>
-                      <span>Points = |predicted − actual| · lower is better</span>
-                      <span className="text-slate-200">|</span>
-                      <span className="flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
-                        <span className="font-semibold text-amber-600">Key team</span> = 3+ positions apart
-                      </span>
-                      <span className="text-slate-200">|</span>
-                      <span className="text-slate-300">Grey row</span> = everyone agrees
+                      <span>Points = |predicted - actual| - lower is better</span>
                     </div>
                   </>
                 )}
               </div>
             )}
 
-            {/* ── My Score view ── */}
             {ladderView === 'ladder' && (
               <div>
                 {myScoreRows.length === 0 ? (
                   <div className="px-6 py-12 text-center text-slate-400 text-sm">
-                    {aflTeams.length === 0
-                      ? 'AFL ladder data not yet available.'
-                      : 'No prediction submitted — scores will appear once you have a submission.'}
+                    {aflTeams.length === 0 ? 'AFL ladder data not yet available.' : 'No prediction submitted -- scores will appear once you have a submission.'}
                   </div>
                 ) : (
                   <>
-                    {/* Score summary banner */}
                     <div className="px-5 py-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-4">
                       <div>
                         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Your score</p>
                         <div className="flex items-baseline gap-2 mt-0.5">
                           <span className="text-3xl font-black text-slate-900">
-                            {myTotalScore !== null ? myTotalScore : '—'}
+                            {myTotalScore !== null ? myTotalScore : '--'}
                           </span>
                           <span className="text-sm text-slate-400 font-medium">points</span>
                           {myLeaderboardRank && (
-                            <span className="text-xs text-slate-400">
-                              · Rank #{myLeaderboardRank} of {leaderboard.length}
-                            </span>
+                            <span className="text-xs text-slate-400">- Rank #{myLeaderboardRank} of {leaderboard.length}</span>
                           )}
                         </div>
                       </div>
                       <div className="flex gap-4">
                         <div className="text-center">
-                          <p className="text-lg font-black text-emerald-600">
-                            {myScoreRows.filter(r => r.diff === 0).length}
-                          </p>
+                          <p className="text-lg font-black text-emerald-600">{myScoreRows.filter(r => r.diff === 0).length}</p>
                           <p className="text-xs text-slate-400">perfect</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-lg font-black text-emerald-600">
-                            {myScoreRows.filter(r => r.diff !== null && r.diff < 0).length}
-                          </p>
-                          <p className="text-xs text-slate-400">↑ over</p>
+                          <p className="text-lg font-black text-emerald-600">{myScoreRows.filter(r => r.diff !== null && r.diff < 0).length}</p>
+                          <p className="text-xs text-slate-400">over</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-lg font-black text-red-500">
-                            {myScoreRows.filter(r => r.diff !== null && r.diff > 0).length}
-                          </p>
-                          <p className="text-xs text-slate-400">↓ under</p>
+                          <p className="text-lg font-black text-red-500">{myScoreRows.filter(r => r.diff !== null && r.diff > 0).length}</p>
+                          <p className="text-xs text-slate-400">under</p>
                         </div>
                       </div>
                     </div>
-
-                    {/* Zone legend */}
                     <div className="px-5 py-2.5 border-b border-slate-100 flex gap-4 flex-wrap">
                       {zoneConfig.map((z) => (
                         <div key={z.label} className="flex items-center gap-1.5">
@@ -993,8 +1100,6 @@ export default function CompetitionPage() {
                         </div>
                       ))}
                     </div>
-
-                    {/* Column headers */}
                     <div className="grid grid-cols-[2.5rem_1fr_2.5rem_3rem_2.5rem] items-center px-4 py-2.5 bg-slate-900 text-slate-400 text-xs font-semibold uppercase tracking-widest">
                       <div className="text-center">AFL</div>
                       <div className="pl-2">Team</div>
@@ -1002,37 +1107,25 @@ export default function CompetitionPage() {
                       <div className="text-center">Move</div>
                       <div className="text-center">Pts</div>
                     </div>
-
-                    {/* Team rows — ordered by actual AFL position */}
                     <div className="divide-y divide-slate-50">
                       {myScoreRows.map((row) => {
                         const meta = getTeamMeta(row.teamName)
                         const zone = getZone(row.actualPos - 1)
                         const pts = row.points
-
                         return (
                           <div
                             key={row.teamName}
-                            className={`grid grid-cols-[2.5rem_1fr_2.5rem_3rem_2.5rem] items-center px-4 py-2.5 ${
-                              pts === 0 ? 'bg-emerald-50/40' : ''
-                            }`}
+                            className={`grid grid-cols-[2.5rem_1fr_2.5rem_3rem_2.5rem] items-center px-4 py-2.5 ${pts === 0 ? 'bg-emerald-50/40' : ''}`}
                           >
-                            {/* AFL actual position */}
                             <div className="flex justify-center">
                               <span className={`inline-flex items-center justify-center w-6 h-6 rounded-lg text-xs font-black ${posBadgeClass(row.actualPos - 1)}`}>
                                 {row.actualPos}
                               </span>
                             </div>
-
-                            {/* Team badge + name */}
                             <div className="flex items-center gap-2.5 pl-2 min-w-0">
                               <div
                                 className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shadow-sm flex-shrink-0"
-                                style={{
-                                  backgroundColor: meta.primaryColor,
-                                  color: meta.textColor,
-                                  border: meta.primaryColor === '#000000' ? '1px solid #333' : 'none',
-                                }}
+                                style={{ backgroundColor: meta.primaryColor, color: meta.textColor, border: meta.primaryColor === '#000000' ? '1px solid #333' : 'none' }}
                               >
                                 {meta.shortName}
                               </div>
@@ -1041,63 +1134,38 @@ export default function CompetitionPage() {
                                 <p className={`text-xs ${zone.text}`}>{zone.label}</p>
                               </div>
                             </div>
-
-                            {/* My predicted position */}
                             <div className="flex justify-center">
                               {row.predictedPos !== null ? (
                                 <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-black ${posBadgeClass(row.predictedPos - 1)}`}>
                                   {row.predictedPos}
                                 </span>
                               ) : (
-                                <span className="w-7 text-center text-xs text-slate-300">—</span>
+                                <span className="w-7 text-center text-xs text-slate-300">--</span>
                               )}
                             </div>
-
-                            {/* Diff arrow */}
                             <div className="flex justify-center">
                               <ScoreDiffBadge diff={row.diff} points={pts} />
                             </div>
-
-                            {/* Points */}
                             <div className="flex justify-center">
-                              <span className={`text-sm font-black ${
-                                pts === 0 ? 'text-emerald-500' :
-                                pts !== null && pts <= 2 ? 'text-emerald-600' :
-                                pts !== null && pts <= 4 ? 'text-amber-500' :
-                                'text-red-500'
-                              }`}>
-                                {pts !== null ? pts : '—'}
+                              <span className={`text-sm font-black ${pts === 0 ? 'text-emerald-500' : pts !== null && pts <= 2 ? 'text-emerald-600' : pts !== null && pts <= 4 ? 'text-amber-500' : 'text-red-500'}`}>
+                                {pts !== null ? pts : '--'}
                               </span>
                             </div>
                           </div>
                         )
                       })}
                     </div>
-
-                    {/* Footer key */}
                     <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-5 text-xs text-slate-400">
-                      <span className="flex items-center gap-1">
-                        <svg className="w-3 h-3 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
-                        </svg>
-                        Predicted higher than actual
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <svg className="w-3 h-3 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7 7" />
-                        </svg>
-                        Predicted lower than actual
-                      </span>
+                      <span>Arrow up = predicted higher than actual</span>
+                      <span>Arrow down = predicted lower than actual</span>
                     </div>
                   </>
                 )}
               </div>
             )}
 
-            {/* ── Team Spotlight view ── */}
             {ladderView === 'spotlight' && (
               <div>
-                {/* Team picker — with team colours */}
                 <div className="px-6 py-4 border-b border-slate-100">
                   <div className="flex flex-wrap gap-2">
                     {aflTeams.map(team => {
@@ -1112,10 +1180,7 @@ export default function CompetitionPage() {
                             backgroundColor: meta.primaryColor,
                             color: meta.textColor,
                             border: meta.primaryColor === '#000000' ? '1px solid #333' : `1px solid ${meta.primaryColor}`,
-                          } : {
-                            backgroundColor: '#f1f5f9',
-                            color: '#475569',
-                          }}
+                          } : { backgroundColor: '#f1f5f9', color: '#475569' }}
                         >
                           {meta.shortName}
                         </button>
@@ -1123,26 +1188,16 @@ export default function CompetitionPage() {
                     })}
                   </div>
                 </div>
-
-                {/* Spotlight table */}
                 {selectedTeam && spotlightRows.length > 0 ? (
                   <div>
-                    {/* Selected team header */}
                     {(() => {
                       const meta = getTeamMeta(selectedTeam)
                       const actualPos = aflTeams.indexOf(selectedTeam) + 1
                       return (
-                        <div
-                          className="px-6 py-4 border-b border-slate-100 flex items-center gap-3"
-                          style={{ backgroundColor: `${meta.primaryColor}10` }}
-                        >
+                        <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3" style={{ backgroundColor: `${meta.primaryColor}10` }}>
                           <div
                             className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black shadow-sm flex-shrink-0"
-                            style={{
-                              backgroundColor: meta.primaryColor,
-                              color: meta.textColor,
-                              border: meta.primaryColor === '#000000' ? '1px solid #333' : 'none',
-                            }}
+                            style={{ backgroundColor: meta.primaryColor, color: meta.textColor, border: meta.primaryColor === '#000000' ? '1px solid #333' : 'none' }}
                           >
                             {meta.shortName}
                           </div>
@@ -1153,8 +1208,6 @@ export default function CompetitionPage() {
                         </div>
                       )
                     })()}
-
-                    {/* Table header */}
                     <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-6 py-2 bg-slate-50 border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
                       <span>Member</span>
                       <span className="text-right w-20">Predicted</span>
@@ -1169,57 +1222,142 @@ export default function CompetitionPage() {
                         row.error <= 5 ? 'text-orange-600 bg-orange-50' :
                         'text-red-600 bg-red-50'
                       return (
-                        <div
-                          key={row.userId}
-                          className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-6 py-3 border-b border-slate-50 items-center ${isMe ? 'bg-emerald-50/60' : 'hover:bg-slate-50'}`}
-                        >
-                          {/* Member name + rank */}
+                        <div key={row.userId} className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-6 py-3 border-b border-slate-50 items-center ${isMe ? 'bg-emerald-50/60' : 'hover:bg-slate-50'}`}>
                           <div className="flex items-center gap-2 min-w-0">
-                            {row.leaderboardRank != null && (
-                              <RankBadge rank={row.leaderboardRank} />
-                            )}
+                            {row.leaderboardRank != null && <RankBadge rank={row.leaderboardRank} />}
                             <div className="min-w-0">
-                              <button
-                                onClick={() => navigate(`/ladder/${row.userId}`)}
-                                className="text-sm font-semibold text-slate-900 hover:text-emerald-700 truncate transition-colors text-left block"
-                              >
+                              <button onClick={() => navigate(`/ladder/${row.userId}`)} className="text-sm font-semibold text-slate-900 hover:text-emerald-700 truncate transition-colors text-left block">
                                 {row.displayName}
                               </button>
-                              {row.totalPoints != null && (
-                                <span className="text-xs text-slate-400">{row.totalPoints} pts total</span>
-                              )}
+                              {row.totalPoints != null && <span className="text-xs text-slate-400">{row.totalPoints} pts total</span>}
                             </div>
-                            {isMe && (
-                              <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>
-                            )}
+                            {isMe && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>}
                           </div>
-
-                          {/* Predicted position */}
                           <div className="text-right w-20">
                             <span className="text-lg font-black text-slate-900">#{row.predictedPos}</span>
                           </div>
-
-                          {/* Actual position */}
                           <div className="text-right w-16">
                             <span className="text-sm font-semibold text-slate-500">#{row.actualPos}</span>
                           </div>
-
-                          {/* Diff badge */}
                           <div className="text-right w-12">
                             <span className={`inline-flex items-center justify-center w-8 h-8 rounded-xl text-xs font-black ${diffColor}`}>
-                              {row.error === 0 ? '✓' : `±${row.error}`}
+                              {row.error === 0 ? 'ok' : `+-${row.error}`}
                             </span>
                           </div>
                         </div>
                       )
                     })}
                     <div className="px-6 py-3 bg-slate-50 text-xs text-slate-400 text-center">
-                      Predicted position vs current AFL standing · ✓ = exact match
+                      Predicted position vs current AFL standing
                     </div>
                   </div>
                 ) : (
                   <div className="px-6 py-12 text-center text-slate-400 text-sm">
                     {aflTeams.length === 0 ? 'AFL ladder data not yet available.' : 'Select a team above.'}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {ladderView === 'predictor' && (
+              <div>
+                {aflTeams.length === 0 || memberPredictions.length === 0 ? (
+                  <div className="px-6 py-12 text-center text-slate-400 text-sm">
+                    {aflTeams.length === 0 ? 'AFL ladder data not yet available.' : 'No predictions submitted yet.'}
+                  </div>
+                ) : (
+                  <div className="flex flex-col lg:flex-row gap-0 lg:gap-6 p-4 lg:p-6">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-sm font-bold text-slate-700">Simulated Ladder</p>
+                        <button
+                          onClick={() => setSimulatedLadder([...aflTeams])}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-semibold transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Reset to AFL Now
+                        </button>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 overflow-hidden">
+                        <DndContext
+                          sensors={sensors}
+                          collisionDetection={closestCenter}
+                          onDragEnd={handleDragEnd}
+                        >
+                          <SortableContext items={simulatedLadder} strategy={verticalListSortingStrategy}>
+                            {simulatedLadder.map((team, index) => (
+                              <SortableTeamRow key={team} team={team} index={index} />
+                            ))}
+                          </SortableContext>
+                        </DndContext>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-2 text-center">Drag teams to reorder - scores update instantly</p>
+                    </div>
+
+                    <div className="lg:w-72 mt-6 lg:mt-0">
+                      <p className="text-sm font-bold text-slate-700 mb-3">Simulated Leaderboard</p>
+                      <div className="rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
+                        {simulatedLeaderboard.map((entry, idx) => {
+                          const isMe = entry.userId === currentUser?.id
+                          const realRanked = [...memberPredictions]
+                            .map(mp => ({ userId: mp.userId, score: totalForMember(mp, aflTeams) }))
+                            .sort((a, b) => a.score - b.score)
+                          const realRank = realRanked.findIndex(r => r.userId === entry.userId) + 1
+                          const simRank = idx + 1
+                          const rankDelta = realRank - simRank
+                          const scoreDelta = entry.simScore - entry.realScore
+                          const bestSimScore = Math.min(...simulatedLeaderboard.map(e => e.simScore))
+                          return (
+                            <div key={entry.userId} className={`flex items-center gap-3 px-4 py-3 ${isMe ? 'bg-emerald-50/60' : 'bg-white'}`}>
+                              <RankBadge rank={simRank} />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`text-sm font-semibold truncate ${isMe ? 'text-emerald-800' : 'text-slate-900'}`}>
+                                    {entry.displayName}
+                                  </span>
+                                  {isMe && (
+                                    <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1 mt-0.5">
+                                  {rankDelta > 0 ? (
+                                    <span className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600">
+                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" />
+                                      </svg>
+                                      +{rankDelta} rank
+                                    </span>
+                                  ) : rankDelta < 0 ? (
+                                    <span className="flex items-center gap-0.5 text-[10px] font-bold text-red-500">
+                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                                      </svg>
+                                      {rankDelta} rank
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400">same rank</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                <p className={`text-base font-black ${entry.simScore === bestSimScore ? 'text-emerald-600' : 'text-slate-900'}`}>
+                                  {entry.simScore}
+                                </p>
+                                {scoreDelta !== 0 && (
+                                  <p className={`text-[10px] font-bold ${scoreDelta < 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                    {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} pts
+                                  </p>
+                                )}
+                                {scoreDelta === 0 && <p className="text-[10px] text-slate-400">no change</p>}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <p className="text-xs text-slate-400 mt-2 text-center">vs real scores - lower is better</p>
+                    </div>
                   </div>
                 )}
               </div>
