@@ -1,21 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  DndContext,
-  closestCenter,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-} from '@dnd-kit/core'
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  useSortable,
-  arrayMove,
-} from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
 import { useCurrentSeason } from '../hooks/useCurrentSeason'
@@ -199,50 +184,13 @@ const RankBadge = ({ rank }: { rank: number }) => {
   )
 }
 
-// ── Predictor: draggable team row ─────────────────────────────────────────────
+// ── Predictor: static team row (projected ladder) ────────────────────────────
 
-function SortableTeamRow({ team, index }: { team: string; index: number }) {
+function ProjectedTeamRow({ team, index, projWins }: { team: string; index: number; projWins?: number }) {
   const meta = getTeamMeta(team)
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: team })
-
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-    zIndex: isDragging ? 50 : undefined,
-    position: 'relative',
-  }
-
   const zone = getZone(index)
-
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`flex items-center gap-3 px-4 py-2.5 border-b border-slate-100 bg-white select-none ${isDragging ? 'shadow-lg rounded-xl' : ''}`}
-    >
-      <button
-        {...attributes}
-        {...listeners}
-        className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing flex-shrink-0 touch-none p-1"
-        aria-label="Drag to reorder"
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-          <circle cx="7" cy="5" r="1.5" />
-          <circle cx="13" cy="5" r="1.5" />
-          <circle cx="7" cy="10" r="1.5" />
-          <circle cx="13" cy="10" r="1.5" />
-          <circle cx="7" cy="15" r="1.5" />
-          <circle cx="13" cy="15" r="1.5" />
-        </svg>
-      </button>
+    <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-100 bg-white last:border-0">
       <span className={`inline-flex items-center justify-center w-6 h-6 rounded-lg text-xs font-black flex-shrink-0 ${posBadgeClass(index)}`}>
         {index + 1}
       </span>
@@ -250,15 +198,16 @@ function SortableTeamRow({ team, index }: { team: string; index: number }) {
         className="w-9 h-9 rounded-xl flex flex-col overflow-hidden shadow-sm flex-shrink-0"
         style={{ border: `1.5px solid ${meta.secondaryColor}40` }}
       >
-        <div
-          className="flex-1 flex items-center justify-center text-[9px] font-black"
-          style={{ backgroundColor: meta.primaryColor, color: meta.textColor }}
-        >
+        <div className="flex-1 flex items-center justify-center text-[9px] font-black"
+          style={{ backgroundColor: meta.primaryColor, color: meta.textColor }}>
           {meta.shortName}
         </div>
         <div className="h-1.5" style={{ backgroundColor: meta.secondaryColor }} />
       </div>
       <span className="flex-1 text-sm font-semibold text-slate-900 leading-tight truncate">{team}</span>
+      {projWins !== undefined && (
+        <span className="text-xs text-slate-400 flex-shrink-0">{projWins}W</span>
+      )}
       <span className={`text-xs font-semibold flex-shrink-0 ${zone.text}`}>{zone.label}</span>
     </div>
   )
@@ -276,11 +225,9 @@ export default function CompetitionPage() {
   const [copySuccess, setCopySuccess] = useState(false)
   const [ladderView, setLadderView] = useState<'ladder' | 'spotlight' | 'compare' | 'predictor'>('compare')
   const [selectedTeam, setSelectedTeam] = useState<string>('')
-  const [simulatedLadder, setSimulatedLadder] = useState<string[]>([])
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
-  )
+  const [predictorMode, setPredictorMode] = useState<'auto' | 'games'>('auto')
+  const [selectedModel, setSelectedModel] = useState<string>('squiggle')
+  const [gamePicks, setGamePicks] = useState<Record<string, string>>({})
 
   const { data: compData, isLoading: compLoading } = useQuery({
     queryKey: ['competition', id],
@@ -317,6 +264,23 @@ export default function CompetitionPage() {
     retry: false,
   })
 
+  // Squiggle predictor data — only fetched when predictor tab is open
+  const { data: projectedLadderData, isLoading: projectedLoading } = useQuery({
+    queryKey: ['afl-projected-ladder'],
+    queryFn: () => api.get('/admin/afl-projected-ladder').then(r => r.data),
+    enabled: ladderView === 'predictor',
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  })
+
+  const { data: upcomingGamesData, isLoading: gamesLoading } = useQuery({
+    queryKey: ['afl-upcoming-games'],
+    queryFn: () => api.get('/admin/afl-upcoming-games').then(r => r.data),
+    enabled: ladderView === 'predictor' && predictorMode === 'games',
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+
   const inviteMutation = useMutation({
     mutationFn: (email: string) =>
       api.post(`/competitions/${id}/invite`, { email }),
@@ -347,11 +311,95 @@ export default function CompetitionPage() {
       .map((t: any) => t.teamName)
   })()
 
+  // ── Predictor memos ──────────────────────────────────────────────────────────
+
+  // Unique model names available from Squiggle projections
+  const availableModels = useMemo(() => {
+    if (!projectedLadderData?.projections?.length) return []
+    return [...new Set((projectedLadderData.projections as any[]).map((p: any) => p.source as string))]
+  }, [projectedLadderData])
+
+  // Projected team order for the selected model
+  const projectedTeamOrder = useMemo((): string[] => {
+    if (!projectedLadderData?.projections?.length) return []
+    return (projectedLadderData.projections as any[])
+      .filter((p: any) => p.source === selectedModel)
+      .sort((a: any, b: any) => a.rank - b.rank)
+      .map((p: any) => p.teamName as string)
+  }, [projectedLadderData, selectedModel])
+
+  // Auto-select first available model when data loads
   useEffect(() => {
-    if (aflTeams.length > 0 && simulatedLadder.length === 0) {
-      setSimulatedLadder([...aflTeams])
+    if (availableModels.length > 0 && !availableModels.includes(selectedModel)) {
+      setSelectedModel(availableModels[0])
     }
-  }, [aflTeams, simulatedLadder.length])
+  }, [availableModels, selectedModel])
+
+  // Simulate ladder from game picks (used in 'games' mode)
+  const gamePredictedLadder = useMemo((): string[] => {
+    const rawTeams = aflLadderData?.ladder?.teams
+    if (!Array.isArray(rawTeams) || rawTeams.length === 0) return aflTeams
+    const games: any[] = upcomingGamesData?.games || []
+
+    const standings = rawTeams.map((t: any) => ({
+      teamName: t.teamName as string,
+      wins: (t.wins || 0) as number,
+      losses: (t.losses || 0) as number,
+      draws: (t.draws || 0) as number,
+      pointsFor: (t.pointsFor || 0) as number,
+      pointsAgainst: (t.pointsAgainst || 0) as number,
+    }))
+
+    for (const [gameId, winnerName] of Object.entries(gamePicks)) {
+      const game = games.find((g: any) => String(g.id) === gameId)
+      if (!game) continue
+      const loserName: string = game.hteamName === winnerName ? game.ateamName : game.hteamName
+      const winner = standings.find(t => t.teamName === winnerName)
+      const loser = standings.find(t => t.teamName === loserName)
+      // Typical AFL scoring: ~90 pts for winner, ~70 for loser (rough 20-pt margin)
+      if (winner) { winner.wins++; winner.pointsFor += 90; winner.pointsAgainst += 70 }
+      if (loser) { loser.losses++; loser.pointsFor += 70; loser.pointsAgainst += 90 }
+    }
+
+    return standings
+      .sort((a, b) => {
+        const aLP = a.wins * 4 + a.draws * 2
+        const bLP = b.wins * 4 + b.draws * 2
+        if (bLP !== aLP) return bLP - aLP
+        const aPct = a.pointsAgainst > 0 ? a.pointsFor / a.pointsAgainst : 0
+        const bPct = b.pointsAgainst > 0 ? b.pointsFor / b.pointsAgainst : 0
+        return bPct - aPct
+      })
+      .map(t => t.teamName)
+  }, [gamePicks, upcomingGamesData, aflLadderData, aflTeams])
+
+  // Active predictor ladder (switches by mode)
+  const activePredictorLadder = predictorMode === 'auto' ? projectedTeamOrder : gamePredictedLadder
+
+  // Projected wins per team for the selected model
+  const projectedWinsMap = useMemo((): Record<string, number> => {
+    if (!projectedLadderData?.projections?.length) return {}
+    return Object.fromEntries(
+      (projectedLadderData.projections as any[])
+        .filter((p: any) => p.source === selectedModel)
+        .map((p: any) => [p.teamName as string, p.projWins as number])
+    )
+  }, [projectedLadderData, selectedModel])
+
+  // Leaderboard against the active predictor ladder
+  const predictorLeaderboard = useMemo(() => {
+    if (activePredictorLadder.length === 0 || memberPredictions.length === 0) return []
+    return [...memberPredictions]
+      .map(mp => ({
+        userId: mp.userId,
+        displayName: mp.displayName,
+        simScore: totalForMember(mp, activePredictorLadder),
+        realScore: totalForMember(mp, aflTeams),
+      }))
+      .sort((a, b) => a.simScore - b.simScore)
+  }, [activePredictorLadder, memberPredictions, aflTeams])
+
+  // ── End predictor memos ───────────────────────────────────────────────────────
 
   useEffect(() => {
     if (aflTeams.length === 0 || memberPredictions.length === 0 || selectedTeam) return
@@ -413,18 +461,6 @@ export default function CompetitionPage() {
     return idx >= 0 ? idx + 1 : null
   }, [leaderboard, currentUser])
 
-  const simulatedLeaderboard = useMemo(() => {
-    if (simulatedLadder.length === 0 || memberPredictions.length === 0) return []
-    return [...memberPredictions]
-      .map((mp) => ({
-        userId: mp.userId,
-        displayName: mp.displayName,
-        simScore: totalForMember(mp, simulatedLadder),
-        realScore: totalForMember(mp, aflTeams),
-      }))
-      .sort((a, b) => a.simScore - b.simScore)
-  }, [simulatedLadder, memberPredictions, aflTeams])
-
   const sortedPredictions = useMemo(() => {
     if (aflTeams.length === 0 || memberPredictions.length === 0) return []
     return [...memberPredictions].sort((a, b) => {
@@ -455,17 +491,6 @@ export default function CompetitionPage() {
     if (!dateStr) return ''
     const d = new Date(dateStr)
     return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-  }
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event
-    if (over && active.id !== over.id) {
-      setSimulatedLadder((prev) => {
-        const oldIndex = prev.indexOf(active.id as string)
-        const newIndex = prev.indexOf(over.id as string)
-        return arrayMove(prev, oldIndex, newIndex)
-      })
-    }
   }
 
   if (compLoading) {
@@ -884,7 +909,7 @@ export default function CompetitionPage() {
                   {ladderView === 'compare' && 'AFL ladder vs everyone\'s predictions - tap a team for detail'}
                   {ladderView === 'ladder' && 'AFL ladder vs your prediction - lower is better'}
                   {ladderView === 'spotlight' && 'Select a team to see where everyone placed them'}
-                  {ladderView === 'predictor' && 'Drag teams to simulate a what-if ladder - see how scores change'}
+                  {ladderView === 'predictor' && 'Auto-predict using Squiggle model projections, or pick game results manually'}
                 </p>
               </div>
               <div className="flex-shrink-0 flex rounded-xl bg-slate-100 p-1 gap-1">
@@ -1261,104 +1286,292 @@ export default function CompetitionPage() {
 
             {ladderView === 'predictor' && (
               <div>
-                {aflTeams.length === 0 || memberPredictions.length === 0 ? (
-                  <div className="px-6 py-12 text-center text-slate-400 text-sm">
-                    {aflTeams.length === 0 ? 'AFL ladder data not yet available.' : 'No predictions submitted yet.'}
-                  </div>
+                {memberPredictions.length === 0 ? (
+                  <div className="px-6 py-12 text-center text-slate-400 text-sm">No predictions submitted yet.</div>
                 ) : (
-                  <div className="flex flex-col lg:flex-row gap-0 lg:gap-6 p-4 lg:p-6">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-sm font-bold text-slate-700">Simulated Ladder</p>
+                  <>
+                    {/* Mode toggle */}
+                    <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3 flex-wrap">
+                      <div className="flex rounded-xl bg-slate-100 p-1 gap-1">
                         <button
-                          onClick={() => setSimulatedLadder([...aflTeams])}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-semibold transition-colors"
+                          onClick={() => setPredictorMode('auto')}
+                          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${predictorMode === 'auto' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                           </svg>
-                          Reset to AFL Now
+                          Auto Predict
+                        </button>
+                        <button
+                          onClick={() => setPredictorMode('games')}
+                          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${predictorMode === 'games' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                          </svg>
+                          Game Picks
                         </button>
                       </div>
-                      <div className="rounded-xl border border-slate-200 overflow-hidden">
-                        <DndContext
-                          sensors={sensors}
-                          collisionDetection={closestCenter}
-                          onDragEnd={handleDragEnd}
-                        >
-                          <SortableContext items={simulatedLadder} strategy={verticalListSortingStrategy}>
-                            {simulatedLadder.map((team, index) => (
-                              <SortableTeamRow key={team} team={team} index={index} />
+                      {predictorMode === 'auto' && availableModels.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500 font-medium">Model:</span>
+                          <select
+                            value={selectedModel}
+                            onChange={e => setSelectedModel(e.target.value)}
+                            className="text-xs font-semibold rounded-lg border border-slate-200 px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          >
+                            {availableModels.map(m => (
+                              <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>
                             ))}
-                          </SortableContext>
-                        </DndContext>
-                      </div>
-                      <p className="text-xs text-slate-400 mt-2 text-center">Drag teams to reorder - scores update instantly</p>
+                          </select>
+                        </div>
+                      )}
+                      {predictorMode === 'games' && Object.keys(gamePicks).length > 0 && (
+                        <button
+                          onClick={() => setGamePicks({})}
+                          className="ml-auto text-xs text-slate-500 hover:text-red-500 font-medium flex items-center gap-1 transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                          Clear picks
+                        </button>
+                      )}
                     </div>
 
-                    <div className="lg:w-72 mt-6 lg:mt-0">
-                      <p className="text-sm font-bold text-slate-700 mb-3">Simulated Leaderboard</p>
-                      <div className="rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
-                        {simulatedLeaderboard.map((entry, idx) => {
-                          const isMe = entry.userId === currentUser?.id
-                          const realRanked = [...memberPredictions]
-                            .map(mp => ({ userId: mp.userId, score: totalForMember(mp, aflTeams) }))
-                            .sort((a, b) => a.score - b.score)
-                          const realRank = realRanked.findIndex(r => r.userId === entry.userId) + 1
-                          const simRank = idx + 1
-                          const rankDelta = realRank - simRank
-                          const scoreDelta = entry.simScore - entry.realScore
-                          const bestSimScore = Math.min(...simulatedLeaderboard.map(e => e.simScore))
-                          return (
-                            <div key={entry.userId} className={`flex items-center gap-3 px-4 py-3 ${isMe ? 'bg-emerald-50/60' : 'bg-white'}`}>
-                              <RankBadge rank={simRank} />
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <span className={`text-sm font-semibold truncate ${isMe ? 'text-emerald-800' : 'text-slate-900'}`}>
-                                    {entry.displayName}
-                                  </span>
-                                  {isMe && (
-                                    <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-1 mt-0.5">
-                                  {rankDelta > 0 ? (
-                                    <span className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600">
-                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" />
-                                      </svg>
-                                      +{rankDelta} rank
-                                    </span>
-                                  ) : rankDelta < 0 ? (
-                                    <span className="flex items-center gap-0.5 text-[10px] font-bold text-red-500">
-                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
-                                      </svg>
-                                      {rankDelta} rank
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] text-slate-400">same rank</span>
-                                  )}
-                                </div>
+                    <div className="flex flex-col lg:flex-row gap-0 lg:divide-x lg:divide-slate-100">
+                      {/* Left: projected ladder or game pickers */}
+                      <div className="flex-1 min-w-0 p-4 lg:p-6">
+                        {/* ── AUTO PREDICT MODE ── */}
+                        {predictorMode === 'auto' && (
+                          <>
+                            {projectedLoading ? (
+                              <div className="space-y-2">
+                                {[...Array(18)].map((_, i) => (
+                                  <div key={i} className="h-11 bg-slate-100 rounded-xl animate-pulse" />
+                                ))}
                               </div>
-                              <div className="text-right flex-shrink-0">
-                                <p className={`text-base font-black ${entry.simScore === bestSimScore ? 'text-emerald-600' : 'text-slate-900'}`}>
-                                  {entry.simScore}
+                            ) : projectedTeamOrder.length === 0 ? (
+                              <div className="py-12 text-center text-slate-400 text-sm">
+                                {availableModels.length === 0
+                                  ? 'Squiggle projections not yet available for this season.'
+                                  : 'Select a model to see projections.'}
+                              </div>
+                            ) : (
+                              <>
+                                <div className="rounded-xl border border-slate-200 overflow-hidden mb-2">
+                                  {projectedTeamOrder.map((team, i) => (
+                                    <ProjectedTeamRow
+                                      key={team}
+                                      team={team}
+                                      index={i}
+                                      projWins={projectedWinsMap[team]}
+                                    />
+                                  ))}
+                                </div>
+                                <p className="text-xs text-slate-400 text-center">
+                                  Squiggle model projection — projected season-end ladder
                                 </p>
-                                {scoreDelta !== 0 && (
-                                  <p className={`text-[10px] font-bold ${scoreDelta < 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                                    {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} pts
-                                  </p>
-                                )}
-                                {scoreDelta === 0 && <p className="text-[10px] text-slate-400">no change</p>}
+                              </>
+                            )}
+                          </>
+                        )}
+
+                        {/* ── GAME PICKS MODE ── */}
+                        {predictorMode === 'games' && (
+                          <>
+                            {gamesLoading ? (
+                              <div className="space-y-3">
+                                {[...Array(4)].map((_, i) => (
+                                  <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse" />
+                                ))}
                               </div>
-                            </div>
-                          )
-                        })}
+                            ) : !upcomingGamesData?.games?.length ? (
+                              <div className="py-12 text-center text-slate-400 text-sm">
+                                No upcoming games available — check back when the round is announced.
+                              </div>
+                            ) : (
+                              <>
+                                <p className="text-sm font-bold text-slate-700 mb-3">
+                                  {upcomingGamesData.games[0]?.roundname || 'Upcoming Round'} — pick the winner
+                                </p>
+                                <div className="space-y-2">
+                                  {upcomingGamesData.games.map((game: any) => {
+                                    const picked = gamePicks[String(game.id)]
+                                    const homeMeta = getTeamMeta(game.hteamName)
+                                    const awayMeta = getTeamMeta(game.ateamName)
+                                    const homeProb = game.hprob != null ? Math.round(game.hprob * 100) : null
+                                    const awayProb = homeProb != null ? 100 - homeProb : null
+                                    return (
+                                      <div key={game.id} className="rounded-xl border border-slate-200 overflow-hidden">
+                                        <div className="flex">
+                                          {/* Home team button */}
+                                          <button
+                                            onClick={() => setGamePicks(p => ({ ...p, [String(game.id)]: game.hteamName }))}
+                                            className={`flex-1 flex flex-col items-center gap-2 py-3 px-2 transition-all ${picked === game.hteamName ? 'ring-2 ring-inset' : 'hover:bg-slate-50'}`}
+                                            style={picked === game.hteamName ? {
+                                              backgroundColor: `${homeMeta.primaryColor}15`,
+                                            } : {}}
+                                          >
+                                            <div
+                                              className="w-10 h-10 rounded-xl flex flex-col overflow-hidden shadow-sm"
+                                              style={{
+                                                border: picked === game.hteamName
+                                                  ? `2px solid ${homeMeta.primaryColor}`
+                                                  : '1.5px solid #e2e8f0'
+                                              }}
+                                            >
+                                              <div className="flex-1 flex items-center justify-center text-[9px] font-black"
+                                                style={{ backgroundColor: homeMeta.primaryColor, color: homeMeta.textColor }}>
+                                                {homeMeta.shortName}
+                                              </div>
+                                              <div className="h-1.5" style={{ backgroundColor: homeMeta.secondaryColor }} />
+                                            </div>
+                                            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">{game.hteamName}</span>
+                                            {homeProb != null && (
+                                              <span className="text-[10px] text-slate-400">{homeProb}%</span>
+                                            )}
+                                            {picked === game.hteamName && (
+                                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
+                                                style={{ backgroundColor: homeMeta.primaryColor }}>
+                                                ✓ Winner
+                                              </span>
+                                            )}
+                                          </button>
+
+                                          {/* VS divider */}
+                                          <div className="flex items-center px-3 text-xs font-bold text-slate-300 flex-shrink-0 border-x border-slate-100">
+                                            vs
+                                          </div>
+
+                                          {/* Away team button */}
+                                          <button
+                                            onClick={() => setGamePicks(p => ({ ...p, [String(game.id)]: game.ateamName }))}
+                                            className={`flex-1 flex flex-col items-center gap-2 py-3 px-2 transition-all ${picked === game.ateamName ? 'ring-2 ring-inset' : 'hover:bg-slate-50'}`}
+                                            style={picked === game.ateamName ? {
+                                              backgroundColor: `${awayMeta.primaryColor}15`,
+                                            } : {}}
+                                          >
+                                            <div
+                                              className="w-10 h-10 rounded-xl flex flex-col overflow-hidden shadow-sm"
+                                              style={{
+                                                border: picked === game.ateamName
+                                                  ? `2px solid ${awayMeta.primaryColor}`
+                                                  : '1.5px solid #e2e8f0'
+                                              }}
+                                            >
+                                              <div className="flex-1 flex items-center justify-center text-[9px] font-black"
+                                                style={{ backgroundColor: awayMeta.primaryColor, color: awayMeta.textColor }}>
+                                                {awayMeta.shortName}
+                                              </div>
+                                              <div className="h-1.5" style={{ backgroundColor: awayMeta.secondaryColor }} />
+                                            </div>
+                                            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">{game.ateamName}</span>
+                                            {awayProb != null && (
+                                              <span className="text-[10px] text-slate-400">{awayProb}%</span>
+                                            )}
+                                            {picked === game.ateamName && (
+                                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
+                                                style={{ backgroundColor: awayMeta.primaryColor }}>
+                                                ✓ Winner
+                                              </span>
+                                            )}
+                                          </button>
+                                        </div>
+                                        {game.venue && (
+                                          <div className="text-[10px] text-slate-400 text-center py-1 border-t border-slate-100 bg-slate-50">
+                                            {game.venue}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                                <p className="text-xs text-slate-400 mt-3 text-center">
+                                  {Object.keys(gamePicks).length} of {upcomingGamesData.games.length} games picked
+                                  {Object.keys(gamePicks).length === 0 && ' — tap a team to select a winner'}
+                                </p>
+                              </>
+                            )}
+                          </>
+                        )}
                       </div>
-                      <p className="text-xs text-slate-400 mt-2 text-center">vs real scores - lower is better</p>
+
+                      {/* Right: projected leaderboard */}
+                      <div className="lg:w-72 flex-shrink-0 p-4 lg:p-6">
+                        <p className="text-sm font-bold text-slate-700 mb-3">
+                          {predictorMode === 'auto' ? 'Projected Leaderboard' : 'Resulting Leaderboard'}
+                        </p>
+                        {predictorLeaderboard.length === 0 ? (
+                          <div className="py-8 text-center text-slate-400 text-xs">
+                            {predictorMode === 'auto' ? 'Select a model above' : 'Pick some game results to see leaderboard'}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
+                              {predictorLeaderboard.map((entry, idx) => {
+                                const isMe = entry.userId === currentUser?.id
+                                const realRanked = [...memberPredictions]
+                                  .map(mp => ({ userId: mp.userId, score: totalForMember(mp, aflTeams) }))
+                                  .sort((a, b) => a.score - b.score)
+                                const realRank = realRanked.findIndex(r => r.userId === entry.userId) + 1
+                                const simRank = idx + 1
+                                const rankDelta = realRank - simRank
+                                const scoreDelta = entry.simScore - entry.realScore
+                                const bestSimScore = Math.min(...predictorLeaderboard.map(e => e.simScore))
+                                return (
+                                  <div key={entry.userId} className={`flex items-center gap-3 px-4 py-3 ${isMe ? 'bg-emerald-50/60' : 'bg-white'}`}>
+                                    <RankBadge rank={simRank} />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={`text-sm font-semibold truncate ${isMe ? 'text-emerald-800' : 'text-slate-900'}`}>
+                                          {entry.displayName}
+                                        </span>
+                                        {isMe && (
+                                          <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>
+                                        )}
+                                      </div>
+                                      <div className="mt-0.5">
+                                        {rankDelta > 0 ? (
+                                          <span className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600">
+                                            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" />
+                                            </svg>
+                                            +{rankDelta} rank
+                                          </span>
+                                        ) : rankDelta < 0 ? (
+                                          <span className="flex items-center gap-0.5 text-[10px] font-bold text-red-500">
+                                            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                            {rankDelta} rank
+                                          </span>
+                                        ) : (
+                                          <span className="text-[10px] text-slate-400">same rank</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="text-right flex-shrink-0">
+                                      <p className={`text-base font-black ${entry.simScore === bestSimScore ? 'text-emerald-600' : 'text-slate-900'}`}>
+                                        {entry.simScore}
+                                      </p>
+                                      {scoreDelta !== 0 && (
+                                        <p className={`text-[10px] font-bold ${scoreDelta < 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                          {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} pts
+                                        </p>
+                                      )}
+                                      {scoreDelta === 0 && <p className="text-[10px] text-slate-400">no change</p>}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                            <p className="text-xs text-slate-400 mt-2 text-center">vs current scores — lower is better</p>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  </>
                 )}
               </div>
             )}

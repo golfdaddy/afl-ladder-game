@@ -77,6 +77,57 @@ export interface SquiggleMappedTeam {
   percentage: number
 }
 
+export interface SquiggleGame {
+  id: number
+  round: number
+  roundname: string
+  hteam: string     // home team (Squiggle name)
+  ateam: string     // away team (Squiggle name)
+  hteamName: string // home team (internal name)
+  ateamName: string // away team (internal name)
+  complete: number  // 0 = upcoming, 100 = complete
+  date: string | null
+  venue: string | null
+  hprob: number | null // Squiggle win probability for home team
+  is_final: number | null
+}
+
+export interface SquiggleProjectedTeam {
+  teamName: string    // internal name
+  source: string      // model name e.g. 'squiggle', 'matterofstats'
+  rank: number        // projected final rank
+  projWins: number    // projected wins
+  swarms: number[]    // probability distribution over positions 1–18
+}
+
+interface SquiggleGamesResponse {
+  games: Array<{
+    id: number
+    round: number
+    roundname: string
+    hteam: string
+    ateam: string
+    hscore: number | null
+    ascore: number | null
+    winner: string
+    complete: number
+    date: string | null
+    venue: string | null
+    hprob: number | null
+    is_final: number | null
+  }>
+}
+
+interface SquiggleLadderResponse {
+  ladder: Array<{
+    team: string
+    source: string
+    rank: number
+    wins: number
+    swarms: number[]
+  }>
+}
+
 export class SquiggleService {
   /**
    * Fetch current season standings from Squiggle API.
@@ -117,6 +168,67 @@ export class SquiggleService {
     }
 
     return mapped
+  }
+
+  /**
+   * Fetch upcoming (incomplete) games for the current round from Squiggle.
+   * Returns the current-round games that haven't been played yet.
+   */
+  static async fetchUpcomingGames(year: number): Promise<SquiggleGame[]> {
+    // Fetch all incomplete games for the year
+    const url = `${SQUIGGLE_BASE}/?q=games;year=${year};complete=0`
+    console.log(`[Squiggle] Fetching upcoming games: ${url}`)
+
+    const data = await fetchJson<SquiggleGamesResponse>(url)
+
+    if (!data.games || data.games.length === 0) {
+      console.warn(`[Squiggle] No upcoming games for ${year}`)
+      return []
+    }
+
+    // Group by round, return only the nearest upcoming round
+    const rounds = [...new Set(data.games.map(g => g.round))].sort((a, b) => a - b)
+    const nearestRound = rounds[0]
+    const roundGames = data.games.filter(g => g.round === nearestRound)
+
+    return roundGames.map(g => ({
+      id: g.id,
+      round: g.round,
+      roundname: g.roundname,
+      hteam: g.hteam,
+      ateam: g.ateam,
+      hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
+      ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
+      complete: g.complete,
+      date: g.date,
+      venue: g.venue,
+      hprob: g.hprob,
+      is_final: g.is_final,
+    }))
+  }
+
+  /**
+   * Fetch projected final ladder positions from Squiggle's model suite.
+   * Returns projections grouped by source model.
+   */
+  static async fetchProjectedLadder(year: number): Promise<SquiggleProjectedTeam[]> {
+    const url = `${SQUIGGLE_BASE}/?q=ladder;year=${year}`
+    console.log(`[Squiggle] Fetching projected ladder: ${url}`)
+
+    const data = await fetchJson<SquiggleLadderResponse>(url)
+
+    if (!data.ladder || data.ladder.length === 0) {
+      console.warn(`[Squiggle] No projected ladder data for ${year}`)
+      return []
+    }
+
+    return data.ladder.map(entry => ({
+      teamName: SQUIGGLE_TO_INTERNAL[entry.team] || entry.team,
+      source: entry.source,
+      rank: entry.rank,
+      projWins: Math.round(entry.wins * 10) / 10,
+      swarms: entry.swarms || [],
+    }))
   }
 
   /** Returns the internal→squiggle name map for debugging */

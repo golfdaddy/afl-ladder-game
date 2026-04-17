@@ -126,6 +126,30 @@ export class AdminController {
     }
   }
 
+  /** Proxy: Squiggle projected final ladder (model suite) — public */
+  static async getProjectedLadder(req: Request, res: Response) {
+    try {
+      const year = parseInt(req.query.year as string) || new Date().getFullYear()
+      const projections = await SquiggleService.fetchProjectedLadder(year)
+      res.json({ projections, year })
+    } catch (error: any) {
+      console.error('[Admin] getProjectedLadder error:', error.message)
+      res.status(500).json({ error: 'Failed to fetch projected ladder from Squiggle' })
+    }
+  }
+
+  /** Proxy: Squiggle upcoming games (nearest incomplete round) — public */
+  static async getUpcomingGames(req: Request, res: Response) {
+    try {
+      const year = parseInt(req.query.year as string) || new Date().getFullYear()
+      const games = await SquiggleService.fetchUpcomingGames(year)
+      res.json({ games, year })
+    } catch (error: any) {
+      console.error('[Admin] getUpcomingGames error:', error.message)
+      res.status(500).json({ error: 'Failed to fetch upcoming games from Squiggle' })
+    }
+  }
+
   /** Admin: list all users with stats */
   static async listUsers(_req: Request, res: Response) {
     try {
