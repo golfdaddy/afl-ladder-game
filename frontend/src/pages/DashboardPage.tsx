@@ -84,8 +84,8 @@ export default function DashboardPage() {
   const [joinError, setJoinError] = useState('')
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [dashSpotlightTeam, setDashSpotlightTeam] = useState<string>('')
-  const [dashView, setDashView] = useState<'compare' | 'spotlight' | 'leaderboard' | 'predictor'>('compare')
-  const [dashPredictorMode, setDashPredictorMode] = useState<'auto' | 'games' | 'finals'>('auto')
+  const [dashView, setDashView] = useState<'compare' | 'spotlight' | 'leaderboard' | 'predictor' | 'finals'>('compare')
+  const [dashPredictorMode, setDashPredictorMode] = useState<'auto' | 'games'>('auto')
   const [dashSelectedModel, setDashSelectedModel] = useState<string>('consensus')
   // Collapse competitions list by default when locked (spotlight section is the main view)
   const [showComps, setShowComps] = useState(!competitionLocked)
@@ -149,7 +149,7 @@ export default function DashboardPage() {
   const { data: dashProjectedData, isLoading: dashProjectedLoading } = useQuery({
     queryKey: ['afl-projected-ladder'],
     queryFn: () => api.get('/admin/afl-projected-ladder').then(r => r.data),
-    enabled: dashView === 'predictor' && competitionLocked && !!firstComp,
+    enabled: (dashView === 'predictor' || dashView === 'finals') && competitionLocked && !!firstComp,
     staleTime: 10 * 60 * 1000,
     retry: false,
   })
@@ -979,16 +979,17 @@ export default function DashboardPage() {
                     {dashView === 'spotlight' && 'Select a team to see where everyone placed them'}
                     {dashView === 'leaderboard' && 'Current competition standings — lower is better'}
                     {dashView === 'predictor' && 'Auto-predict using Squiggle models, or pick game results manually'}
+                    {dashView === 'finals' && 'Simulate the AFL finals using projected seedings — see who wins and what it means for scores'}
                   </p>
                 </div>
                 <div className="flex-shrink-0 flex rounded-xl bg-slate-100 p-1 gap-1">
-                  {(['compare', 'spotlight', 'leaderboard', 'predictor'] as const).map(tab => (
+                  {(['compare', 'spotlight', 'leaderboard', 'predictor', 'finals'] as const).map(tab => (
                     <button
                       key={tab}
                       onClick={() => setDashView(tab)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors capitalize ${dashView === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >
-                      {tab === 'compare' ? 'League Compare' : tab === 'spotlight' ? 'Spotlight' : tab === 'leaderboard' ? 'Leaderboard' : 'Predictor'}
+                      {tab === 'compare' ? 'League Compare' : tab === 'spotlight' ? 'Spotlight' : tab === 'leaderboard' ? 'Leaderboard' : tab === 'predictor' ? 'Predictor' : 'Finals'}
                     </button>
                   ))}
                 </div>
@@ -1278,13 +1279,6 @@ export default function DashboardPage() {
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
                             Game Picks
                           </button>
-                          <button
-                            onClick={() => setDashPredictorMode('finals')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${dashPredictorMode === 'finals' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3l14 9-14 9V3z" /></svg>
-                            Finals Predictor
-                          </button>
                         </div>
                         {dashPredictorMode === 'auto' && dashAvailableModels.length > 0 && (
                           <div className="flex items-center gap-2">
@@ -1308,15 +1302,6 @@ export default function DashboardPage() {
                         <FullSeasonSimulator
                           seasonYear={seasonYear}
                           aflLadderData={aflLadderData}
-                          predictions={spotlightPredictions as MemberPrediction[]}
-                          currentUserId={user?.id ?? null}
-                        />
-                      )}
-
-                      {/* ── FINALS PREDICTOR MODE ── */}
-                      {dashPredictorMode === 'finals' && (
-                        <FinalsPredictor
-                          consensusLadder={dashConsensusData}
                           predictions={spotlightPredictions as MemberPrediction[]}
                           currentUserId={user?.id ?? null}
                         />
@@ -1479,6 +1464,25 @@ export default function DashboardPage() {
                       </div>
                       )}
                     </>
+                  )}
+                </div>
+              )}
+
+              {/* ── FINALS PREDICTOR TAB ── */}
+              {dashView === 'finals' && (
+                <div>
+                  {(spotlightPredictions as MemberPrediction[]).length === 0 ? (
+                    <div className="px-5 py-12 text-center text-slate-400 text-sm">No predictions submitted yet.</div>
+                  ) : dashConsensusData.length === 0 ? (
+                    <div className="px-5 py-12 text-center text-slate-400 text-sm">
+                      {dashProjectedLoading ? 'Loading model projections…' : 'Projection data unavailable.'}
+                    </div>
+                  ) : (
+                    <FinalsPredictor
+                      consensusLadder={dashConsensusData}
+                      predictions={spotlightPredictions as MemberPrediction[]}
+                      currentUserId={user?.id ?? null}
+                    />
                   )}
                 </div>
               )}

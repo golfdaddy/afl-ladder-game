@@ -292,9 +292,9 @@ export default function CompetitionPage() {
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [inviteError, setInviteError] = useState('')
   const [copySuccess, setCopySuccess] = useState(false)
-  const [ladderView, setLadderView] = useState<'ladder' | 'spotlight' | 'compare' | 'predictor'>('compare')
+  const [ladderView, setLadderView] = useState<'ladder' | 'spotlight' | 'compare' | 'predictor' | 'finals'>('compare')
   const [selectedTeam, setSelectedTeam] = useState<string>('')
-  const [predictorMode, setPredictorMode] = useState<'auto' | 'games' | 'finals'>('auto')
+  const [predictorMode, setPredictorMode] = useState<'auto' | 'games'>('auto')
   const [selectedModel, setSelectedModel] = useState<string>('consensus')
 
   const { data: compData, isLoading: compLoading } = useQuery({
@@ -336,7 +336,7 @@ export default function CompetitionPage() {
   const { data: projectedLadderData, isLoading: projectedLoading } = useQuery({
     queryKey: ['afl-projected-ladder'],
     queryFn: () => api.get('/admin/afl-projected-ladder').then(r => r.data),
-    enabled: ladderView === 'predictor',
+    enabled: ladderView === 'predictor' || ladderView === 'finals',
     staleTime: 10 * 60 * 1000,
     retry: false,
   })
@@ -1012,13 +1012,14 @@ export default function CompetitionPage() {
             <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-3 flex-wrap">
               <div className="flex-1 min-w-0">
                 <h2 className="text-lg font-bold text-slate-900">
-                  {ladderView === 'compare' ? 'League Compare' : ladderView === 'ladder' ? 'My Score' : ladderView === 'spotlight' ? 'Team Spotlight' : 'Predictor'}
+                  {ladderView === 'compare' ? 'League Compare' : ladderView === 'ladder' ? 'My Score' : ladderView === 'spotlight' ? 'Team Spotlight' : ladderView === 'predictor' ? 'Predictor' : 'Finals Predictor'}
                 </h2>
                 <p className="text-sm text-slate-500 mt-0.5">
                   {ladderView === 'compare' && 'AFL ladder vs everyone\'s predictions - tap a team for detail'}
                   {ladderView === 'ladder' && 'AFL ladder vs your prediction - lower is better'}
                   {ladderView === 'spotlight' && 'Select a team to see where everyone placed them'}
                   {ladderView === 'predictor' && 'Auto-predict using Squiggle model projections, or pick game results manually'}
+                  {ladderView === 'finals' && 'Simulate the AFL finals using projected seedings — see who wins and what it means for scores'}
                 </p>
               </div>
               <div className="flex-shrink-0 flex rounded-xl bg-slate-100 p-1 gap-1">
@@ -1045,6 +1046,12 @@ export default function CompetitionPage() {
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${ladderView === 'predictor' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   Predictor
+                </button>
+                <button
+                  onClick={() => setLadderView('finals')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${ladderView === 'finals' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  Finals
                 </button>
               </div>
             </div>
@@ -1420,15 +1427,6 @@ export default function CompetitionPage() {
                           </svg>
                           Game Picks
                         </button>
-                        <button
-                          onClick={() => setPredictorMode('finals')}
-                          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${predictorMode === 'finals' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3l14 9-14 9V3z" />
-                          </svg>
-                          Finals Predictor
-                        </button>
                       </div>
                       {predictorMode === 'auto' && availableModels.length > 0 && (
                         <div className="flex items-center gap-2">
@@ -1452,15 +1450,6 @@ export default function CompetitionPage() {
                       <FullSeasonSimulator
                         seasonYear={seasonYear}
                         aflLadderData={aflLadderData}
-                        predictions={memberPredictions}
-                        currentUserId={currentUser?.id ?? null}
-                      />
-                    )}
-
-                    {/* ── FINALS PREDICTOR MODE ── */}
-                    {predictorMode === 'finals' && (
-                      <FinalsPredictor
-                        consensusLadder={consensusData}
                         predictions={memberPredictions}
                         currentUserId={currentUser?.id ?? null}
                       />
@@ -1709,6 +1698,25 @@ export default function CompetitionPage() {
                     </div>
                     )}
                   </>
+                )}
+              </div>
+            )}
+
+            {/* ── FINALS PREDICTOR TAB ── */}
+            {ladderView === 'finals' && (
+              <div>
+                {memberPredictions.length === 0 ? (
+                  <div className="px-6 py-12 text-center text-slate-400 text-sm">No predictions submitted yet.</div>
+                ) : consensusData.length === 0 ? (
+                  <div className="px-6 py-12 text-center text-slate-400 text-sm">
+                    {projectedLoading ? 'Loading model projections…' : 'Projection data unavailable.'}
+                  </div>
+                ) : (
+                  <FinalsPredictor
+                    consensusLadder={consensusData}
+                    predictions={memberPredictions}
+                    currentUserId={currentUser?.id ?? null}
+                  />
                 )}
               </div>
             )}
