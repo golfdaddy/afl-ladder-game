@@ -231,6 +231,44 @@ export class SquiggleService {
     }))
   }
 
+  /**
+   * Fetch ALL incomplete regular-season games for the year, grouped by round.
+   * Finals rounds (is_final = 1) are excluded.
+   */
+  static async fetchAllUpcomingRounds(year: number): Promise<{ round: number; roundname: string; games: SquiggleGame[] }[]> {
+    const url = `${SQUIGGLE_BASE}/?q=games;year=${year};complete=0`
+    console.log(`[Squiggle] Fetching all upcoming rounds: ${url}`)
+
+    const data = await fetchJson<SquiggleGamesResponse>(url)
+    if (!data.games || data.games.length === 0) return []
+
+    // Only regular-season games (not finals)
+    const regularGames = data.games.filter(g => !g.is_final)
+    const roundNums = [...new Set(regularGames.map(g => g.round))].sort((a, b) => a - b)
+
+    return roundNums.map(round => {
+      const roundGames = regularGames.filter(g => g.round === round)
+      return {
+        round,
+        roundname: roundGames[0].roundname,
+        games: roundGames.map(g => ({
+          id: g.id,
+          round: g.round,
+          roundname: g.roundname,
+          hteam: g.hteam,
+          ateam: g.ateam,
+          hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
+          ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
+          complete: g.complete,
+          date: g.date,
+          venue: g.venue,
+          hprob: g.hprob,
+          is_final: g.is_final,
+        })),
+      }
+    })
+  }
+
   /** Returns the internal→squiggle name map for debugging */
   static getTeamMap(): Record<string, string> {
     return SQUIGGLE_TO_INTERNAL

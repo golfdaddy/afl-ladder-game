@@ -15,6 +15,7 @@ router.get('/afl-ladder/:seasonId', asyncHandler(AdminController.getLatestLadder
 // Public — Squiggle proxy endpoints (no auth needed)
 router.get('/afl-projected-ladder', asyncHandler(AdminController.getProjectedLadder))
 router.get('/afl-upcoming-games', asyncHandler(AdminController.getUpcomingGames))
+router.get('/afl-all-upcoming-rounds', asyncHandler(AdminController.getAllUpcomingRounds))
 
 // Admin-only ladder ops — requires X-Admin-Secret header or valid Bearer token
 router.post('/afl-ladder', adminAuth, asyncHandler(AdminController.uploadAFLLadder))
