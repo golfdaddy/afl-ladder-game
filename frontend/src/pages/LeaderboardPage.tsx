@@ -189,15 +189,23 @@ export default function LeaderboardPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-slate-900 truncate">{item.displayName}</p>
-                    <p className="text-sm text-slate-400">{item.competitionCount} competition{item.competitionCount !== 1 ? 's' : ''}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {item.competitionCount === 0 ? (
+                        <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">Solo</span>
+                      ) : (
+                        <span className="text-xs text-slate-400">{item.competitionCount} competition{item.competitionCount !== 1 ? 's' : ''}</span>
+                      )}
+                    </div>
                   </div>
                   <div className="text-right flex-shrink-0">
                     {item.totalPoints != null ? (
-                      <p className="text-2xl font-black text-slate-900">{item.totalPoints}</p>
+                      <>
+                        <p className="text-2xl font-black text-slate-900">{item.totalPoints}</p>
+                        <p className="text-xs text-slate-400">pts</p>
+                      </>
                     ) : (
                       <p className="text-sm font-semibold text-slate-400">—</p>
                     )}
-                    <p className="text-xs text-slate-400">{item.competitionCount} comp{item.competitionCount !== 1 ? 's' : ''}</p>
                   </div>
                 </div>
               ))}
