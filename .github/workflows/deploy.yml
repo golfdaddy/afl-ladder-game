@@ -2,11 +2,56 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
+  # ─── Sandbox Deploy (develop branch) ────────────────────────────────────────
+  deploy-frontend-sandbox:
+    name: Deploy Frontend to Vercel (Sandbox)
+    if: github.ref == 'refs/heads/develop' && vars.ENABLE_SANDBOX_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Deploy to Vercel (Sandbox Preview)
+        working-directory: frontend
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel deploy --yes --token=$VERCEL_TOKEN
+
+  deploy-backend-sandbox:
+    name: Deploy Backend to Railway (Sandbox)
+    if: github.ref == 'refs/heads/develop' && vars.ENABLE_SANDBOX_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway (Sandbox)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_SANDBOX_TOKEN }}
+        run: railway up --service backend --detach
+
+  # ─── Production Deploy (main branch) ────────────────────────────────────────
   deploy-frontend:
-    name: Deploy Frontend to Vercel
+    name: Deploy Frontend to Vercel (Production)
+    if: github.ref == 'refs/heads/main' && vars.ENABLE_GITHUB_VERCEL_DEPLOY == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -31,7 +76,8 @@ jobs:
         run: vercel deploy --prod --yes --token=$VERCEL_TOKEN
 
   deploy-backend:
-    name: Deploy Backend to Railway
+    name: Deploy Backend to Railway (Production)
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -41,7 +87,6 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy to Railway (Production)
-        working-directory: backend
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: railway up --service backend --detach

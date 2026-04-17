@@ -6,6 +6,16 @@ import { SquiggleService } from '../services/squiggle'
 import { EmailGroupModel } from '../models/emailGroup'
 import { UserModel, UserRole } from '../models/user'
 import { db } from '../db'
+import { SeasonModel } from '../models/season'
+import { EmailTemplateModel } from '../models/emailTemplate'
+import { renderTemplate, extractTemplateTokens } from '../utils/templateRenderer'
+import { sendEmail } from '../services/email'
+import {
+  EMAIL_TEMPLATE_STARTERS,
+  EMAIL_TEMPLATE_TOKEN_REFERENCE,
+  buildEmailDynamicData,
+  getEmailTemplateSampleData,
+} from '../utils/emailTemplateData'
 
 export class AdminController {
   /** Manual ladder upload (18 teams with full stats) */
@@ -116,6 +126,42 @@ export class AdminController {
     }
   }
 
+  /** Proxy: Squiggle projected final ladder (model suite) — public */
+  static async getProjectedLadder(req: Request, res: Response) {
+    try {
+      const year = parseInt(req.query.year as string) || new Date().getFullYear()
+      const projections = await SquiggleService.fetchProjectedLadder(year)
+      res.json({ projections, year })
+    } catch (error: any) {
+      console.error('[Admin] getProjectedLadder error:', error.message)
+      res.status(500).json({ error: 'Failed to fetch projected ladder from Squiggle' })
+    }
+  }
+
+  /** Proxy: Squiggle all upcoming regular-season rounds — public */
+  static async getAllUpcomingRounds(req: Request, res: Response) {
+    try {
+      const year = parseInt(req.query.year as string) || new Date().getFullYear()
+      const rounds = await SquiggleService.fetchAllUpcomingRounds(year)
+      res.json({ rounds, year })
+    } catch (error: any) {
+      console.error('[Admin] getAllUpcomingRounds error:', error.message)
+      res.status(500).json({ error: 'Failed to fetch upcoming rounds from Squiggle' })
+    }
+  }
+
+  /** Proxy: Squiggle upcoming games (nearest incomplete round) — public */
+  static async getUpcomingGames(req: Request, res: Response) {
+    try {
+      const year = parseInt(req.query.year as string) || new Date().getFullYear()
+      const games = await SquiggleService.fetchUpcomingGames(year)
+      res.json({ games, year })
+    } catch (error: any) {
+      console.error('[Admin] getUpcomingGames error:', error.message)
+      res.status(500).json({ error: 'Failed to fetch upcoming games from Squiggle' })
+    }
+  }
+
   /** Admin: list all users with stats */
   static async listUsers(_req: Request, res: Response) {
     try {
@@ -186,6 +232,388 @@ export class AdminController {
       status: 'ok',
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV,
+    })
+  }
+
+  /** Admin: update season cutoff date (YYYY-MM-DD) */
+  static async setSeasonCutoff(req: AuthRequest, res: Response) {
+    try {
+      const seasonId = Number(req.params.seasonId)
+      const cutoffDate = String(req.body?.cutoffDate || '')
+
+      if (!Number.isInteger(seasonId) || seasonId <= 0) {
+        return res.status(400).json({ error: 'Invalid seasonId' })
+      }
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoffDate)) {
+        return res.status(400).json({ error: 'cutoffDate must be YYYY-MM-DD' })
+      }
+
+      const updated = await SeasonModel.updateCutoffDate(seasonId, cutoffDate)
+      if (!updated) {
+        return res.status(404).json({ error: 'Season not found' })
+      }
+
+      res.json({ message: 'Season cutoff updated', season: updated })
+    } catch (error) {
+      console.error('Set season cutoff error:', error)
+      res.status(500).json({ error: 'Failed to update season cutoff' })
+    }
+  }
+
+  /** Admin: token docs + starter snippets for email template builder */
+  static async getEmailTemplateReference(_req: Request, res: Response) {
+    res.json({
+      tokenReference: EMAIL_TEMPLATE_TOKEN_REFERENCE,
+      starterTemplates: EMAIL_TEMPLATE_STARTERS,
+    })
+  }
+
+  /** Admin: list reusable email templates */
+  static async listEmailTemplates(_req: Request, res: Response) {
+    const templates = await EmailTemplateModel.list()
+    res.json({
+      tokenReference: EMAIL_TEMPLATE_TOKEN_REFERENCE,
+      templates: templates.map((t) => ({
+        ...t,
+        tokens: extractTemplateTokens(`${t.subjectTemplate}\n${t.htmlTemplate}`),
+      })),
+    })
+  }
+
+  /** Admin: create an email template */
+  static async createEmailTemplate(req: AuthRequest, res: Response) {
+    const name = String(req.body?.name || '').trim()
+    const description = String(req.body?.description || '').trim() || null
+    const subjectTemplate = String(req.body?.subjectTemplate || '').trim()
+    const htmlTemplate = String(req.body?.htmlTemplate || '').trim()
+
+    if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+    if (!name) return res.status(400).json({ error: 'Template name is required' })
+    if (!subjectTemplate) return res.status(400).json({ error: 'Subject template is required' })
+    if (!htmlTemplate) return res.status(400).json({ error: 'HTML template is required' })
+
+    try {
+      const template = await EmailTemplateModel.create({
+        name,
+        description,
+        subjectTemplate,
+        htmlTemplate,
+        createdBy: req.userId,
+      })
+      res.status(201).json({
+        template: {
+          ...template,
+          tokens: extractTemplateTokens(`${template.subjectTemplate}\n${template.htmlTemplate}`),
+        },
+      })
+    } catch (error: any) {
+      if (error?.code === '23505') {
+        return res.status(400).json({ error: 'A template with this name already exists' })
+      }
+      throw error
+    }
+  }
+
+  /** Admin: update an email template */
+  static async updateEmailTemplate(req: AuthRequest, res: Response) {
+    const templateId = Number(req.params.id)
+    const name = String(req.body?.name || '').trim()
+    const description = String(req.body?.description || '').trim() || null
+    const subjectTemplate = String(req.body?.subjectTemplate || '').trim()
+    const htmlTemplate = String(req.body?.htmlTemplate || '').trim()
+
+    if (!Number.isFinite(templateId)) return res.status(400).json({ error: 'Invalid template id' })
+    if (!name) return res.status(400).json({ error: 'Template name is required' })
+    if (!subjectTemplate) return res.status(400).json({ error: 'Subject template is required' })
+    if (!htmlTemplate) return res.status(400).json({ error: 'HTML template is required' })
+
+    try {
+      const template = await EmailTemplateModel.update(templateId, {
+        name,
+        description,
+        subjectTemplate,
+        htmlTemplate,
+      })
+      if (!template) return res.status(404).json({ error: 'Template not found' })
+
+      res.json({
+        template: {
+          ...template,
+          tokens: extractTemplateTokens(`${template.subjectTemplate}\n${template.htmlTemplate}`),
+        },
+      })
+    } catch (error: any) {
+      if (error?.code === '23505') {
+        return res.status(400).json({ error: 'A template with this name already exists' })
+      }
+      throw error
+    }
+  }
+
+  /** Admin: delete an email template */
+  static async deleteEmailTemplate(req: AuthRequest, res: Response) {
+    const templateId = Number(req.params.id)
+    if (!Number.isFinite(templateId)) return res.status(400).json({ error: 'Invalid template id' })
+
+    await EmailTemplateModel.delete(templateId)
+    res.json({ message: 'Template deleted' })
+  }
+
+  /** Admin: preview rendered template with sample/custom data */
+  static async previewEmailTemplate(req: AuthRequest, res: Response) {
+    const subjectTemplate = String(req.body?.subjectTemplate || '').trim()
+    const htmlTemplate = String(req.body?.htmlTemplate || '').trim()
+    const seasonIdRaw = req.body?.seasonId
+    const seasonId = seasonIdRaw === undefined || seasonIdRaw === null || seasonIdRaw === ''
+      ? null
+      : Number(seasonIdRaw)
+    const sampleData = req.body?.sampleData && typeof req.body.sampleData === 'object' && !Array.isArray(req.body.sampleData)
+      ? req.body.sampleData
+      : {}
+
+    if (!subjectTemplate || !htmlTemplate) {
+      return res.status(400).json({ error: 'subjectTemplate and htmlTemplate are required' })
+    }
+    if (seasonId !== null && (!Number.isFinite(seasonId) || seasonId <= 0)) {
+      return res.status(400).json({ error: 'seasonId must be a positive number' })
+    }
+
+    const dynamicData = await buildEmailDynamicData({
+      seasonId,
+      recipientUserIds: [],
+    })
+
+    const baseSample = {
+      ...getEmailTemplateSampleData(),
+      ...dynamicData.globalData,
+      ...sampleData,
+    }
+
+    res.json({
+      preview: {
+        subject: renderTemplate(subjectTemplate, baseSample),
+        html: renderTemplate(htmlTemplate, baseSample),
+      },
+      tokens: extractTemplateTokens(`${subjectTemplate}\n${htmlTemplate}`),
+      tokenReference: EMAIL_TEMPLATE_TOKEN_REFERENCE,
+      starterTemplates: EMAIL_TEMPLATE_STARTERS,
+    })
+  }
+
+  /** Admin: send a templated campaign to all users or selected email groups */
+  static async sendEmailTemplate(req: AuthRequest, res: Response) {
+    if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+
+    const templateId = Number(req.params.id)
+    if (!Number.isFinite(templateId)) return res.status(400).json({ error: 'Invalid template id' })
+
+    const testEmail = String(req.body?.testEmail || '').trim()
+    const roundNoRaw = req.body?.roundNo
+    const roundNo = roundNoRaw === undefined || roundNoRaw === null || roundNoRaw === ''
+      ? null
+      : Number(roundNoRaw)
+    const seasonIdRaw = req.body?.seasonId
+    const seasonIdInput = seasonIdRaw === undefined || seasonIdRaw === null || seasonIdRaw === ''
+      ? null
+      : Number(seasonIdRaw)
+    const groupIdsRaw = Array.isArray(req.body?.groupIds) ? req.body.groupIds : []
+    const groupIds = groupIdsRaw
+      .map((g: unknown) => Number(g))
+      .filter((g: number) => Number.isInteger(g) && g > 0)
+    const dryRun = req.body?.dryRun === true
+    const customData = req.body?.customData && typeof req.body.customData === 'object' && !Array.isArray(req.body.customData)
+      ? req.body.customData
+      : {}
+
+    if (roundNo !== null && (!Number.isFinite(roundNo) || roundNo <= 0)) {
+      return res.status(400).json({ error: 'roundNo must be a positive number' })
+    }
+    if (seasonIdInput !== null && (!Number.isFinite(seasonIdInput) || seasonIdInput <= 0)) {
+      return res.status(400).json({ error: 'seasonId must be a positive number' })
+    }
+
+    const template = await EmailTemplateModel.findById(templateId)
+    if (!template) return res.status(404).json({ error: 'Template not found' })
+
+    let effectiveSeasonId = seasonIdInput
+    let seasonYear = new Date().getFullYear()
+
+    if (effectiveSeasonId) {
+      const season = await SeasonModel.getSeasonById(effectiveSeasonId)
+      if (season) seasonYear = season.year
+      else effectiveSeasonId = null
+    } else {
+      const current = await SeasonModel.getCurrentSeason()
+      if (current) {
+        effectiveSeasonId = current.id
+        seasonYear = current.year
+      }
+    }
+
+    let recipients: Array<{ id: number | null; email: string; displayName: string }> = []
+
+    if (testEmail) {
+      recipients = [{ id: null, email: testEmail, displayName: 'Test User' }]
+    } else {
+      let userIds: number[] = []
+      if (groupIds.length > 0) {
+        const idSet = new Set<number>()
+        for (const groupId of groupIds) {
+          const ids = await EmailGroupModel.getUsersInGroup(groupId)
+          ids.forEach((id) => idSet.add(id))
+        }
+        userIds = Array.from(idSet)
+        if (userIds.length === 0) {
+          return res.status(400).json({ error: 'Selected groups contain no users' })
+        }
+      }
+
+      if (userIds.length > 0) {
+        const usersResult = await db.query(
+          `SELECT id, email, display_name as "displayName"
+           FROM users
+           WHERE id = ANY($1::int[])
+           ORDER BY id ASC`,
+          [userIds]
+        )
+        recipients = usersResult.rows
+      } else {
+        const usersResult = await db.query(
+          `SELECT id, email, display_name as "displayName"
+           FROM users
+           ORDER BY id ASC`
+        )
+        recipients = usersResult.rows
+      }
+    }
+
+    const uniqueRecipients = new Map<string, { id: number | null; email: string; displayName: string }>()
+    for (const recipient of recipients) {
+      if (!recipient.email) continue
+      const key = recipient.email.trim().toLowerCase()
+      if (!key || uniqueRecipients.has(key)) continue
+      uniqueRecipients.set(key, recipient)
+    }
+
+    recipients = Array.from(uniqueRecipients.values())
+    if (recipients.length === 0) {
+      return res.status(400).json({ error: 'No recipients found' })
+    }
+
+    const statsByUserId = new Map<number, { competitionCount: number; predictionCount: number; bestScore: number | null }>()
+    const recipientsWithUserIds = recipients.filter((r): r is { id: number; email: string; displayName: string } => r.id !== null)
+
+    if (effectiveSeasonId && recipientsWithUserIds.length > 0) {
+      const ids = recipientsWithUserIds.map((r) => r.id)
+      const statsResult = await db.query(
+        `SELECT u.id,
+                COUNT(DISTINCT CASE WHEN c.id IS NOT NULL THEN cm.competition_id END)::int as "competitionCount",
+                COUNT(DISTINCT p.id)::int as "predictionCount",
+                MIN(s.total_points)::int as "bestScore"
+         FROM users u
+         LEFT JOIN competition_members cm ON cm.user_id = u.id
+         LEFT JOIN competitions c ON c.id = cm.competition_id AND c.season_id = $1
+         LEFT JOIN predictions p ON p.user_id = u.id AND p.season_id = $1
+         LEFT JOIN scores s ON s.user_id = u.id AND s.season_id = $1
+         WHERE u.id = ANY($2::int[])
+         GROUP BY u.id`,
+        [effectiveSeasonId, ids]
+      )
+
+      for (const row of statsResult.rows) {
+        statsByUserId.set(Number(row.id), {
+          competitionCount: Number(row.competitionCount) || 0,
+          predictionCount: Number(row.predictionCount) || 0,
+          bestScore: row.bestScore === null || row.bestScore === undefined ? null : Number(row.bestScore),
+        })
+      }
+    }
+
+    const dynamicData = await buildEmailDynamicData({
+      seasonId: effectiveSeasonId,
+      recipientUserIds: recipientsWithUserIds.map((recipient) => recipient.id),
+    })
+    const sampleData = getEmailTemplateSampleData()
+
+    const rendered = recipients.map((recipient) => {
+      const stats = recipient.id !== null
+        ? statsByUserId.get(recipient.id) || { competitionCount: 0, predictionCount: 0, bestScore: null }
+        : { competitionCount: 0, predictionCount: 0, bestScore: null }
+      const perUserDynamic = recipient.id !== null
+        ? dynamicData.perUserData.get(recipient.id) || {}
+        : {
+            userCompetitionsHtml: sampleData.userCompetitionsHtml,
+            userCompetitionsCount: sampleData.userCompetitionsCount,
+          }
+
+      const context = {
+        displayName: recipient.displayName,
+        email: recipient.email,
+        userId: recipient.id,
+        seasonId: effectiveSeasonId,
+        seasonYear,
+        roundNo,
+        competitionCount: stats.competitionCount,
+        predictionCount: stats.predictionCount,
+        bestScore: stats.bestScore,
+        ...dynamicData.globalData,
+        ...perUserDynamic,
+        ...customData,
+      }
+
+      return {
+        to: recipient.email,
+        subject: renderTemplate(template.subjectTemplate, context),
+        html: renderTemplate(template.htmlTemplate, context),
+      }
+    })
+
+    if (dryRun) {
+      return res.json({
+        message: 'Dry run only — no emails sent',
+        recipientCount: rendered.length,
+        preview: rendered.slice(0, 3),
+        tokens: extractTemplateTokens(`${template.subjectTemplate}\n${template.htmlTemplate}`),
+        tokenReference: EMAIL_TEMPLATE_TOKEN_REFERENCE,
+      })
+    }
+
+    const failures: Array<{ to: string; error: string }> = []
+    let sentCount = 0
+
+    for (const item of rendered) {
+      try {
+        await sendEmail({
+          to: item.to,
+          subject: item.subject,
+          html: item.html,
+        })
+        sentCount += 1
+      } catch (error: any) {
+        failures.push({
+          to: item.to,
+          error: error?.message || 'Unknown send error',
+        })
+      }
+    }
+
+    await EmailTemplateModel.logCampaignSend({
+      templateId: template.id,
+      sentBy: req.userId,
+      seasonId: effectiveSeasonId,
+      roundNo,
+      recipientCount: sentCount,
+    })
+
+    res.json({
+      message: testEmail
+        ? `Test email sent to ${testEmail}`
+        : `Campaign completed. Sent ${sentCount}/${rendered.length} emails.`,
+      recipientCount: rendered.length,
+      sentCount,
+      failedCount: failures.length,
+      failures: failures.slice(0, 20),
     })
   }
 
