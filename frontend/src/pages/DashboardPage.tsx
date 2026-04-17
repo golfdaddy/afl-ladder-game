@@ -84,7 +84,7 @@ export default function DashboardPage() {
   const [joinError, setJoinError] = useState('')
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [dashSpotlightTeam, setDashSpotlightTeam] = useState<string>('')
-  const [dashView, setDashView] = useState<'compare' | 'spotlight' | 'leaderboard' | 'predictor' | 'finals'>('compare')
+  const [dashView, setDashView] = useState<'compare' | 'spotlight' | 'leaderboard' | 'predictor'>('compare')
   const [dashPredictorMode, setDashPredictorMode] = useState<'auto' | 'games'>('auto')
   const [dashSelectedModel, setDashSelectedModel] = useState<string>('consensus')
   // Collapse competitions list by default when locked (spotlight section is the main view)
@@ -149,7 +149,7 @@ export default function DashboardPage() {
   const { data: dashProjectedData, isLoading: dashProjectedLoading } = useQuery({
     queryKey: ['afl-projected-ladder'],
     queryFn: () => api.get('/admin/afl-projected-ladder').then(r => r.data),
-    enabled: (dashView === 'predictor' || dashView === 'finals') && competitionLocked && !!firstComp,
+    enabled: true,
     staleTime: 10 * 60 * 1000,
     retry: false,
   })
@@ -979,17 +979,16 @@ export default function DashboardPage() {
                     {dashView === 'spotlight' && 'Select a team to see where everyone placed them'}
                     {dashView === 'leaderboard' && 'Current competition standings — lower is better'}
                     {dashView === 'predictor' && 'Auto-predict using Squiggle models, or pick game results manually'}
-                    {dashView === 'finals' && 'Simulate the AFL finals using projected seedings — see who wins and what it means for scores'}
                   </p>
                 </div>
                 <div className="flex-shrink-0 flex rounded-xl bg-slate-100 p-1 gap-1">
-                  {(['compare', 'spotlight', 'leaderboard', 'predictor', 'finals'] as const).map(tab => (
+                  {(['compare', 'spotlight', 'leaderboard', 'predictor'] as const).map(tab => (
                     <button
                       key={tab}
                       onClick={() => setDashView(tab)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors capitalize ${dashView === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >
-                      {tab === 'compare' ? 'League Compare' : tab === 'spotlight' ? 'Spotlight' : tab === 'leaderboard' ? 'Leaderboard' : tab === 'predictor' ? 'Predictor' : 'Finals'}
+                      {tab === 'compare' ? 'League Compare' : tab === 'spotlight' ? 'Spotlight' : tab === 'leaderboard' ? 'Leaderboard' : 'Predictor'}
                     </button>
                   ))}
                 </div>
@@ -1468,27 +1467,28 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* ── FINALS PREDICTOR TAB ── */}
-              {dashView === 'finals' && (
-                <div>
-                  {(spotlightPredictions as MemberPrediction[]).length === 0 ? (
-                    <div className="px-5 py-12 text-center text-slate-400 text-sm">No predictions submitted yet.</div>
-                  ) : dashConsensusData.length === 0 ? (
-                    <div className="px-5 py-12 text-center text-slate-400 text-sm">
-                      {dashProjectedLoading ? 'Loading model projections…' : 'Projection data unavailable.'}
-                    </div>
-                  ) : (
-                    <FinalsPredictor
-                      consensusLadder={dashConsensusData}
-                      predictions={spotlightPredictions as MemberPrediction[]}
-                      currentUserId={user?.id ?? null}
-                    />
-                  )}
-                </div>
-              )}
             </div>
           </div>
         )}
+
+        {/* ── FINALS PREDICTOR (always visible) ── */}
+        <div className="mt-8 bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100">
+            <h2 className="text-base font-bold text-slate-900">Finals Predictor</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Simulate the AFL finals using projected model seedings — see who wins and what it means for scores</p>
+          </div>
+          {dashConsensusData.length === 0 ? (
+            <div className="px-5 py-12 text-center text-slate-400 text-sm">
+              {dashProjectedLoading ? 'Loading model projections…' : 'Projection data unavailable.'}
+            </div>
+          ) : (
+            <FinalsPredictor
+              consensusLadder={dashConsensusData}
+              predictions={spotlightPredictions as MemberPrediction[]}
+              currentUserId={user?.id ?? null}
+            />
+          )}
+        </div>
       </main>
     </div>
   )

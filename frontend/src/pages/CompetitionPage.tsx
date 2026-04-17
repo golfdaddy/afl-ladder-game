@@ -292,7 +292,7 @@ export default function CompetitionPage() {
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [inviteError, setInviteError] = useState('')
   const [copySuccess, setCopySuccess] = useState(false)
-  const [ladderView, setLadderView] = useState<'ladder' | 'spotlight' | 'compare' | 'predictor' | 'finals'>('compare')
+  const [ladderView, setLadderView] = useState<'ladder' | 'spotlight' | 'compare' | 'predictor'>('compare')
   const [selectedTeam, setSelectedTeam] = useState<string>('')
   const [predictorMode, setPredictorMode] = useState<'auto' | 'games'>('auto')
   const [selectedModel, setSelectedModel] = useState<string>('consensus')
@@ -336,7 +336,7 @@ export default function CompetitionPage() {
   const { data: projectedLadderData, isLoading: projectedLoading } = useQuery({
     queryKey: ['afl-projected-ladder'],
     queryFn: () => api.get('/admin/afl-projected-ladder').then(r => r.data),
-    enabled: ladderView === 'predictor' || ladderView === 'finals',
+    enabled: true,
     staleTime: 10 * 60 * 1000,
     retry: false,
   })
@@ -1012,14 +1012,13 @@ export default function CompetitionPage() {
             <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-3 flex-wrap">
               <div className="flex-1 min-w-0">
                 <h2 className="text-lg font-bold text-slate-900">
-                  {ladderView === 'compare' ? 'League Compare' : ladderView === 'ladder' ? 'My Score' : ladderView === 'spotlight' ? 'Team Spotlight' : ladderView === 'predictor' ? 'Predictor' : 'Finals Predictor'}
+                  {ladderView === 'compare' ? 'League Compare' : ladderView === 'ladder' ? 'My Score' : ladderView === 'spotlight' ? 'Team Spotlight' : 'Predictor'}
                 </h2>
                 <p className="text-sm text-slate-500 mt-0.5">
                   {ladderView === 'compare' && 'AFL ladder vs everyone\'s predictions - tap a team for detail'}
                   {ladderView === 'ladder' && 'AFL ladder vs your prediction - lower is better'}
                   {ladderView === 'spotlight' && 'Select a team to see where everyone placed them'}
                   {ladderView === 'predictor' && 'Auto-predict using Squiggle model projections, or pick game results manually'}
-                  {ladderView === 'finals' && 'Simulate the AFL finals using projected seedings — see who wins and what it means for scores'}
                 </p>
               </div>
               <div className="flex-shrink-0 flex rounded-xl bg-slate-100 p-1 gap-1">
@@ -1046,12 +1045,6 @@ export default function CompetitionPage() {
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${ladderView === 'predictor' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   Predictor
-                </button>
-                <button
-                  onClick={() => setLadderView('finals')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${ladderView === 'finals' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                  Finals
                 </button>
               </div>
             </div>
@@ -1702,26 +1695,27 @@ export default function CompetitionPage() {
               </div>
             )}
 
-            {/* ── FINALS PREDICTOR TAB ── */}
-            {ladderView === 'finals' && (
-              <div>
-                {memberPredictions.length === 0 ? (
-                  <div className="px-6 py-12 text-center text-slate-400 text-sm">No predictions submitted yet.</div>
-                ) : consensusData.length === 0 ? (
-                  <div className="px-6 py-12 text-center text-slate-400 text-sm">
-                    {projectedLoading ? 'Loading model projections…' : 'Projection data unavailable.'}
-                  </div>
-                ) : (
-                  <FinalsPredictor
-                    consensusLadder={consensusData}
-                    predictions={memberPredictions}
-                    currentUserId={currentUser?.id ?? null}
-                  />
-                )}
-              </div>
-            )}
           </div>
         )}
+
+        {/* ── FINALS PREDICTOR (always visible) ── */}
+        <div className="mt-6 bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          <div className="px-6 py-5 border-b border-slate-100">
+            <h2 className="text-lg font-bold text-slate-900">Finals Predictor</h2>
+            <p className="text-sm text-slate-500 mt-0.5">Simulate the AFL finals using projected model seedings — see who wins and what it means for scores</p>
+          </div>
+          {consensusData.length === 0 ? (
+            <div className="px-6 py-12 text-center text-slate-400 text-sm">
+              {projectedLoading ? 'Loading model projections…' : 'Projection data unavailable.'}
+            </div>
+          ) : (
+            <FinalsPredictor
+              consensusLadder={consensusData}
+              predictions={memberPredictions}
+              currentUserId={currentUser?.id ?? null}
+            />
+          )}
+        </div>
       </main>
     </div>
   )
