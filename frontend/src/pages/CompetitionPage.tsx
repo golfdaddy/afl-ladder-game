@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
 import { useCurrentSeason } from '../hooks/useCurrentSeason'
+import FullSeasonSimulator from '../components/FullSeasonSimulator'
 
 interface LeaderboardEntry {
   userId: number
@@ -285,7 +286,7 @@ export default function CompetitionPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
-  const { seasonId, isLocked: competitionLocked } = useCurrentSeason()
+  const { seasonId, seasonYear, isLocked: competitionLocked } = useCurrentSeason()
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [inviteError, setInviteError] = useState('')
@@ -294,7 +295,6 @@ export default function CompetitionPage() {
   const [selectedTeam, setSelectedTeam] = useState<string>('')
   const [predictorMode, setPredictorMode] = useState<'auto' | 'games'>('auto')
   const [selectedModel, setSelectedModel] = useState<string>('consensus')
-  const [gamePicks, setGamePicks] = useState<Record<string, string>>({})
 
   const { data: compData, isLoading: compLoading } = useQuery({
     queryKey: ['competition', id],
@@ -337,14 +337,6 @@ export default function CompetitionPage() {
     queryFn: () => api.get('/admin/afl-projected-ladder').then(r => r.data),
     enabled: ladderView === 'predictor',
     staleTime: 10 * 60 * 1000,
-    retry: false,
-  })
-
-  const { data: upcomingGamesData, isLoading: gamesLoading } = useQuery({
-    queryKey: ['afl-upcoming-games'],
-    queryFn: () => api.get('/admin/afl-upcoming-games').then(r => r.data),
-    enabled: ladderView === 'predictor' && predictorMode === 'games',
-    staleTime: 5 * 60 * 1000,
     retry: false,
   })
 
@@ -432,46 +424,8 @@ export default function CompetitionPage() {
     }
   }, [availableModels, selectedModel])
 
-  // Simulate ladder from game picks (used in 'games' mode)
-  const gamePredictedLadder = useMemo((): string[] => {
-    const rawTeams = aflLadderData?.ladder?.teams
-    if (!Array.isArray(rawTeams) || rawTeams.length === 0) return aflTeams
-    const games: any[] = upcomingGamesData?.games || []
-
-    const standings = rawTeams.map((t: any) => ({
-      teamName: t.teamName as string,
-      wins: (t.wins || 0) as number,
-      losses: (t.losses || 0) as number,
-      draws: (t.draws || 0) as number,
-      pointsFor: (t.pointsFor || 0) as number,
-      pointsAgainst: (t.pointsAgainst || 0) as number,
-    }))
-
-    for (const [gameId, winnerName] of Object.entries(gamePicks)) {
-      const game = games.find((g: any) => String(g.id) === gameId)
-      if (!game) continue
-      const loserName: string = game.hteamName === winnerName ? game.ateamName : game.hteamName
-      const winner = standings.find(t => t.teamName === winnerName)
-      const loser = standings.find(t => t.teamName === loserName)
-      // Typical AFL scoring: ~90 pts for winner, ~70 for loser (rough 20-pt margin)
-      if (winner) { winner.wins++; winner.pointsFor += 90; winner.pointsAgainst += 70 }
-      if (loser) { loser.losses++; loser.pointsFor += 70; loser.pointsAgainst += 90 }
-    }
-
-    return standings
-      .sort((a, b) => {
-        const aLP = a.wins * 4 + a.draws * 2
-        const bLP = b.wins * 4 + b.draws * 2
-        if (bLP !== aLP) return bLP - aLP
-        const aPct = a.pointsAgainst > 0 ? a.pointsFor / a.pointsAgainst : 0
-        const bPct = b.pointsAgainst > 0 ? b.pointsFor / b.pointsAgainst : 0
-        return bPct - aPct
-      })
-      .map(t => t.teamName)
-  }, [gamePicks, upcomingGamesData, aflLadderData, aflTeams])
-
-  // Active predictor ladder (switches by mode)
-  const activePredictorLadder = predictorMode === 'auto' ? projectedTeamOrder : gamePredictedLadder
+  // Active predictor ladder (auto mode only)
+  const activePredictorLadder = projectedTeamOrder
 
   // Projected wins per team for the selected model
   const projectedWinsMap = useMemo((): Record<string, number> => {
@@ -1481,19 +1435,20 @@ export default function CompetitionPage() {
                           </select>
                         </div>
                       )}
-                      {predictorMode === 'games' && Object.keys(gamePicks).length > 0 && (
-                        <button
-                          onClick={() => setGamePicks({})}
-                          className="ml-auto text-xs text-slate-500 hover:text-red-500 font-medium flex items-center gap-1 transition-colors"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                          Clear picks
-                        </button>
-                      )}
                     </div>
 
+                    {/* ── GAME PICKS MODE: Full Season Simulator ── */}
+                    {predictorMode === 'games' && (
+                      <FullSeasonSimulator
+                        seasonYear={seasonYear}
+                        aflLadderData={aflLadderData}
+                        predictions={memberPredictions}
+                        currentUserId={currentUser?.id ?? null}
+                      />
+                    )}
+
+                    {/* ── AUTO PREDICT MODE layout ── */}
+                    {predictorMode === 'auto' && (
                     <div className="flex flex-col lg:flex-row gap-0 lg:divide-x lg:divide-slate-100">
                       {/* Left: projected ladder or game pickers */}
                       <div className="flex-1 min-w-0 p-4 lg:p-6">
@@ -1564,124 +1519,6 @@ export default function CompetitionPage() {
                           </>
                         )}
 
-                        {/* ── GAME PICKS MODE ── */}
-                        {predictorMode === 'games' && (
-                          <>
-                            {gamesLoading ? (
-                              <div className="space-y-3">
-                                {[...Array(4)].map((_, i) => (
-                                  <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse" />
-                                ))}
-                              </div>
-                            ) : !upcomingGamesData?.games?.length ? (
-                              <div className="py-12 text-center text-slate-400 text-sm">
-                                No upcoming games available — check back when the round is announced.
-                              </div>
-                            ) : (
-                              <>
-                                <p className="text-sm font-bold text-slate-700 mb-3">
-                                  {upcomingGamesData.games[0]?.roundname || 'Upcoming Round'} — pick the winner
-                                </p>
-                                <div className="space-y-2">
-                                  {upcomingGamesData.games.map((game: any) => {
-                                    const picked = gamePicks[String(game.id)]
-                                    const homeMeta = getTeamMeta(game.hteamName)
-                                    const awayMeta = getTeamMeta(game.ateamName)
-                                    const homeProb = game.hprob != null ? Math.round(game.hprob * 100) : null
-                                    const awayProb = homeProb != null ? 100 - homeProb : null
-                                    return (
-                                      <div key={game.id} className="rounded-xl border border-slate-200 overflow-hidden">
-                                        <div className="flex">
-                                          {/* Home team button */}
-                                          <button
-                                            onClick={() => setGamePicks(p => ({ ...p, [String(game.id)]: game.hteamName }))}
-                                            className={`flex-1 flex flex-col items-center gap-2 py-3 px-2 transition-all ${picked === game.hteamName ? 'ring-2 ring-inset' : 'hover:bg-slate-50'}`}
-                                            style={picked === game.hteamName ? {
-                                              backgroundColor: `${homeMeta.primaryColor}15`,
-                                            } : {}}
-                                          >
-                                            <div
-                                              className="w-10 h-10 rounded-xl flex flex-col overflow-hidden shadow-sm"
-                                              style={{
-                                                border: picked === game.hteamName
-                                                  ? `2px solid ${homeMeta.primaryColor}`
-                                                  : '1.5px solid #e2e8f0'
-                                              }}
-                                            >
-                                              <div className="flex-1 flex items-center justify-center text-[9px] font-black"
-                                                style={{ backgroundColor: homeMeta.primaryColor, color: homeMeta.textColor }}>
-                                                {homeMeta.shortName}
-                                              </div>
-                                              <div className="h-1.5" style={{ backgroundColor: homeMeta.secondaryColor }} />
-                                            </div>
-                                            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">{game.hteamName}</span>
-                                            {homeProb != null && (
-                                              <span className="text-[10px] text-slate-400">{homeProb}%</span>
-                                            )}
-                                            {picked === game.hteamName && (
-                                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
-                                                style={{ backgroundColor: homeMeta.primaryColor }}>
-                                                ✓ Winner
-                                              </span>
-                                            )}
-                                          </button>
-
-                                          {/* VS divider */}
-                                          <div className="flex items-center px-3 text-xs font-bold text-slate-300 flex-shrink-0 border-x border-slate-100">
-                                            vs
-                                          </div>
-
-                                          {/* Away team button */}
-                                          <button
-                                            onClick={() => setGamePicks(p => ({ ...p, [String(game.id)]: game.ateamName }))}
-                                            className={`flex-1 flex flex-col items-center gap-2 py-3 px-2 transition-all ${picked === game.ateamName ? 'ring-2 ring-inset' : 'hover:bg-slate-50'}`}
-                                            style={picked === game.ateamName ? {
-                                              backgroundColor: `${awayMeta.primaryColor}15`,
-                                            } : {}}
-                                          >
-                                            <div
-                                              className="w-10 h-10 rounded-xl flex flex-col overflow-hidden shadow-sm"
-                                              style={{
-                                                border: picked === game.ateamName
-                                                  ? `2px solid ${awayMeta.primaryColor}`
-                                                  : '1.5px solid #e2e8f0'
-                                              }}
-                                            >
-                                              <div className="flex-1 flex items-center justify-center text-[9px] font-black"
-                                                style={{ backgroundColor: awayMeta.primaryColor, color: awayMeta.textColor }}>
-                                                {awayMeta.shortName}
-                                              </div>
-                                              <div className="h-1.5" style={{ backgroundColor: awayMeta.secondaryColor }} />
-                                            </div>
-                                            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">{game.ateamName}</span>
-                                            {awayProb != null && (
-                                              <span className="text-[10px] text-slate-400">{awayProb}%</span>
-                                            )}
-                                            {picked === game.ateamName && (
-                                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
-                                                style={{ backgroundColor: awayMeta.primaryColor }}>
-                                                ✓ Winner
-                                              </span>
-                                            )}
-                                          </button>
-                                        </div>
-                                        {game.venue && (
-                                          <div className="text-[10px] text-slate-400 text-center py-1 border-t border-slate-100 bg-slate-50">
-                                            {game.venue}
-                                          </div>
-                                        )}
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-                                <p className="text-xs text-slate-400 mt-3 text-center">
-                                  {Object.keys(gamePicks).length} of {upcomingGamesData.games.length} games picked
-                                  {Object.keys(gamePicks).length === 0 && ' — tap a team to select a winner'}
-                                </p>
-                              </>
-                            )}
-                          </>
-                        )}
                       </div>
 
                       {/* Right: consensus member tally (consensus mode) OR projected leaderboard (single model / games) */}
@@ -1775,14 +1612,14 @@ export default function CompetitionPage() {
                             )}
                           </>
                         ) : (
-                          /* ── SINGLE MODEL / GAMES: projected leaderboard ── */
+                          /* ── SINGLE MODEL: projected leaderboard ── */
                           <>
                             <p className="text-sm font-bold text-slate-700 mb-3">
-                              {predictorMode === 'auto' ? 'Projected Leaderboard' : 'Resulting Leaderboard'}
+                              Projected Leaderboard
                             </p>
                             {predictorLeaderboard.length === 0 ? (
                               <div className="py-8 text-center text-slate-400 text-xs">
-                                {predictorMode === 'auto' ? 'Select a model above' : 'Pick some game results to see leaderboard'}
+                                Select a model above
                               </div>
                             ) : (
                               <>
@@ -1851,6 +1688,7 @@ export default function CompetitionPage() {
                         )}
                       </div>
                     </div>
+                    )}
                   </>
                 )}
               </div>

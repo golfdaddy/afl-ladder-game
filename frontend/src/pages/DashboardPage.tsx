@@ -7,6 +7,7 @@ import {
   getTeamMeta, zoneConfig, getZone, posBadgeClass, ptsColorClass,
   classifyTeam, getScoreForMember, totalForMember,
 } from '../utils/aflTeams'
+import FullSeasonSimulator from '../components/FullSeasonSimulator'
 import { SEASON_OVER, FEATURE_FANTASY7_ENABLED } from '../config'
 import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
@@ -85,7 +86,6 @@ export default function DashboardPage() {
   const [dashView, setDashView] = useState<'compare' | 'spotlight' | 'leaderboard' | 'predictor'>('compare')
   const [dashPredictorMode, setDashPredictorMode] = useState<'auto' | 'games'>('auto')
   const [dashSelectedModel, setDashSelectedModel] = useState<string>('consensus')
-  const [dashGamePicks, setDashGamePicks] = useState<Record<string, string>>({})
   // Collapse competitions list by default when locked (spotlight section is the main view)
   const [showComps, setShowComps] = useState(!competitionLocked)
 
@@ -150,14 +150,6 @@ export default function DashboardPage() {
     queryFn: () => api.get('/admin/afl-projected-ladder').then(r => r.data),
     enabled: dashView === 'predictor' && competitionLocked && !!firstComp,
     staleTime: 10 * 60 * 1000,
-    retry: false,
-  })
-
-  const { data: dashUpcomingGamesData, isLoading: dashGamesLoading } = useQuery({
-    queryKey: ['afl-upcoming-games'],
-    queryFn: () => api.get('/admin/afl-upcoming-games').then(r => r.data),
-    enabled: dashView === 'predictor' && dashPredictorMode === 'games' && competitionLocked && !!firstComp,
-    staleTime: 5 * 60 * 1000,
     retry: false,
   })
 
@@ -268,40 +260,7 @@ export default function DashboardPage() {
     }
   }, [dashAvailableModels, dashSelectedModel])
 
-  const dashGamePredictedLadder = useMemo((): string[] => {
-    const rawTeams = aflLadderData?.ladder?.teams
-    if (!Array.isArray(rawTeams) || rawTeams.length === 0) return aflTeams
-    const games: any[] = dashUpcomingGamesData?.games || []
-    const standings = rawTeams.map((t: any) => ({
-      teamName: t.teamName as string,
-      wins: (t.wins || 0) as number,
-      losses: (t.losses || 0) as number,
-      draws: (t.draws || 0) as number,
-      pointsFor: (t.pointsFor || 0) as number,
-      pointsAgainst: (t.pointsAgainst || 0) as number,
-    }))
-    for (const [gameId, winnerName] of Object.entries(dashGamePicks)) {
-      const game = games.find((g: any) => String(g.id) === gameId)
-      if (!game) continue
-      const loserName: string = game.hteamName === winnerName ? game.ateamName : game.hteamName
-      const winner = standings.find(t => t.teamName === winnerName)
-      const loser = standings.find(t => t.teamName === loserName)
-      if (winner) { winner.wins++; winner.pointsFor += 90; winner.pointsAgainst += 70 }
-      if (loser) { loser.losses++; loser.pointsFor += 70; loser.pointsAgainst += 90 }
-    }
-    return standings
-      .sort((a, b) => {
-        const aLP = a.wins * 4 + a.draws * 2
-        const bLP = b.wins * 4 + b.draws * 2
-        if (bLP !== aLP) return bLP - aLP
-        const aPct = a.pointsAgainst > 0 ? a.pointsFor / a.pointsAgainst : 0
-        const bPct = b.pointsAgainst > 0 ? b.pointsFor / b.pointsAgainst : 0
-        return bPct - aPct
-      })
-      .map(t => t.teamName)
-  }, [dashGamePicks, dashUpcomingGamesData, aflLadderData, aflTeams])
-
-  const dashActivePredictorLadder = dashPredictorMode === 'auto' ? dashProjectedTeamOrder : dashGamePredictedLadder
+  const dashActivePredictorLadder = dashProjectedTeamOrder
 
   const dashMemberConsensusData = useMemo(() => {
     if (!dashProjectedData?.projections?.length || (spotlightPredictions as MemberPrediction[]).length === 0) return []
@@ -1334,13 +1293,20 @@ export default function DashboardPage() {
                             </select>
                           </div>
                         )}
-                        {dashPredictorMode === 'games' && Object.keys(dashGamePicks).length > 0 && (
-                          <button onClick={() => setDashGamePicks({})} className="ml-auto text-xs text-slate-500 hover:text-red-500 font-medium">
-                            Clear picks
-                          </button>
-                        )}
                       </div>
 
+                      {/* ── GAME PICKS MODE: Full Season Simulator ── */}
+                      {dashPredictorMode === 'games' && (
+                        <FullSeasonSimulator
+                          seasonYear={seasonYear}
+                          aflLadderData={aflLadderData}
+                          predictions={spotlightPredictions as MemberPrediction[]}
+                          currentUserId={user?.id ?? null}
+                        />
+                      )}
+
+                      {/* ── AUTO PREDICT MODE layout ── */}
+                      {dashPredictorMode === 'auto' && (
                       <div className="flex flex-col lg:flex-row lg:divide-x lg:divide-slate-100">
                         {/* Left: auto predict ladder or game pickers */}
                         <div className="flex-1 min-w-0 p-4 lg:p-5">
@@ -1413,68 +1379,11 @@ export default function DashboardPage() {
                             </>
                           )}
 
-                          {/* GAME PICKS */}
-                          {dashPredictorMode === 'games' && (
-                            <>
-                              {dashGamesLoading ? (
-                                <div className="space-y-2">{[...Array(4)].map((_, i) => <div key={i} className="h-16 bg-slate-100 rounded-xl animate-pulse" />)}</div>
-                              ) : !dashUpcomingGamesData?.games?.length ? (
-                                <div className="py-8 text-center text-slate-400 text-sm">No upcoming games available.</div>
-                              ) : (
-                                <>
-                                  <p className="text-xs font-bold text-slate-600 mb-2">{dashUpcomingGamesData.games[0]?.roundname || 'Upcoming Round'} — pick the winner</p>
-                                  <div className="space-y-2">
-                                    {dashUpcomingGamesData.games.map((game: any) => {
-                                      const picked = dashGamePicks[String(game.id)]
-                                      const homeMeta = getTeamMeta(game.hteamName)
-                                      const awayMeta = getTeamMeta(game.ateamName)
-                                      const homeProb = game.hprob != null ? Math.round(game.hprob * 100) : null
-                                      const awayProb = homeProb != null ? 100 - homeProb : null
-                                      return (
-                                        <div key={game.id} className="rounded-xl border border-slate-200 overflow-hidden">
-                                          <div className="flex">
-                                            <button
-                                              onClick={() => setDashGamePicks(p => ({ ...p, [String(game.id)]: game.hteamName }))}
-                                              className={`flex-1 flex flex-col items-center gap-1.5 py-2.5 px-2 transition-all ${picked === game.hteamName ? '' : 'hover:bg-slate-50'}`}
-                                              style={picked === game.hteamName ? { backgroundColor: `${homeMeta.primaryColor}15` } : {}}
-                                            >
-                                              <div className="w-9 h-9 rounded-xl flex flex-col overflow-hidden shadow-sm" style={{ border: picked === game.hteamName ? `2px solid ${homeMeta.primaryColor}` : '1.5px solid #e2e8f0' }}>
-                                                <div className="flex-1 flex items-center justify-center text-[9px] font-black" style={{ backgroundColor: homeMeta.primaryColor, color: homeMeta.textColor }}>{homeMeta.shortName}</div>
-                                                <div className="h-1.5" style={{ backgroundColor: homeMeta.secondaryColor }} />
-                                              </div>
-                                              <span className="text-[10px] font-semibold text-slate-700 text-center leading-tight">{game.hteamName}</span>
-                                              {homeProb != null && <span className="text-[10px] text-slate-400">{homeProb}%</span>}
-                                              {picked === game.hteamName && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full text-white" style={{ backgroundColor: homeMeta.primaryColor }}>✓ Winner</span>}
-                                            </button>
-                                            <div className="flex items-center px-2 text-xs font-bold text-slate-300 border-x border-slate-100">vs</div>
-                                            <button
-                                              onClick={() => setDashGamePicks(p => ({ ...p, [String(game.id)]: game.ateamName }))}
-                                              className={`flex-1 flex flex-col items-center gap-1.5 py-2.5 px-2 transition-all ${picked === game.ateamName ? '' : 'hover:bg-slate-50'}`}
-                                              style={picked === game.ateamName ? { backgroundColor: `${awayMeta.primaryColor}15` } : {}}
-                                            >
-                                              <div className="w-9 h-9 rounded-xl flex flex-col overflow-hidden shadow-sm" style={{ border: picked === game.ateamName ? `2px solid ${awayMeta.primaryColor}` : '1.5px solid #e2e8f0' }}>
-                                                <div className="flex-1 flex items-center justify-center text-[9px] font-black" style={{ backgroundColor: awayMeta.primaryColor, color: awayMeta.textColor }}>{awayMeta.shortName}</div>
-                                                <div className="h-1.5" style={{ backgroundColor: awayMeta.secondaryColor }} />
-                                              </div>
-                                              <span className="text-[10px] font-semibold text-slate-700 text-center leading-tight">{game.ateamName}</span>
-                                              {awayProb != null && <span className="text-[10px] text-slate-400">{awayProb}%</span>}
-                                              {picked === game.ateamName && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full text-white" style={{ backgroundColor: awayMeta.primaryColor }}>✓ Winner</span>}
-                                            </button>
-                                          </div>
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                  <p className="text-[10px] text-slate-400 mt-2 text-center">{Object.keys(dashGamePicks).length}/{dashUpcomingGamesData.games.length} picked</p>
-                                </>
-                              )}
-                            </>
-                          )}
                         </div>
 
                         {/* Right: consensus member panel OR projected leaderboard */}
                         <div className="lg:w-72 flex-shrink-0 p-4 lg:p-5">
-                          {dashPredictorMode === 'auto' && dashSelectedModel === 'consensus' ? (
+                          {dashSelectedModel === 'consensus' ? (
                             <>
                               <div className="flex items-center justify-between mb-3">
                                 <p className="text-xs font-bold text-slate-700">League Consensus</p>
@@ -1520,11 +1429,11 @@ export default function DashboardPage() {
                           ) : (
                             <>
                               <p className="text-xs font-bold text-slate-700 mb-3">
-                                {dashPredictorMode === 'auto' ? 'Projected Leaderboard' : 'Resulting Leaderboard'}
+                                Projected Leaderboard
                               </p>
                               {dashPredictorLeaderboard.length === 0 ? (
                                 <div className="py-6 text-center text-slate-400 text-xs">
-                                  {dashPredictorMode === 'auto' ? 'Select a model' : 'Pick some game results'}
+                                  Select a model
                                 </div>
                               ) : (
                                 <div className="rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
@@ -1551,6 +1460,7 @@ export default function DashboardPage() {
                           )}
                         </div>
                       </div>
+                      )}
                     </>
                   )}
                 </div>
