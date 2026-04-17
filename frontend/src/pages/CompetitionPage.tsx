@@ -496,6 +496,63 @@ export default function CompetitionPage() {
       .sort((a, b) => a.simScore - b.simScore)
   }, [activePredictorLadder, memberPredictions, aflTeams])
 
+  // Member consensus: for each Squiggle model, rank members by score, then tally positions
+  const memberConsensusData = useMemo(() => {
+    if (!projectedLadderData?.projections?.length || memberPredictions.length === 0) return []
+    const projections = projectedLadderData.projections as any[]
+    const models = [...new Set(projections.map((p: any) => p.source as string))]
+
+    // Per-model leaderboard ranking for each member
+    const ranksByModel: Record<string, Record<number, number>> = {}
+    const scoresByModel: Record<string, Record<number, number>> = {}
+    for (const model of models) {
+      const modelLadder = projections
+        .filter((p: any) => p.source === model)
+        .sort((a: any, b: any) => a.rank - b.rank)
+        .map((p: any) => p.teamName as string)
+
+      const scored = [...memberPredictions]
+        .map(mp => ({ userId: mp.userId, score: totalForMember(mp, modelLadder) }))
+        .sort((a, b) => a.score - b.score)
+
+      ranksByModel[model] = {}
+      scoresByModel[model] = {}
+      scored.forEach((entry, idx) => {
+        ranksByModel[model][entry.userId] = idx + 1
+        scoresByModel[model][entry.userId] = entry.score
+      })
+    }
+
+    return memberPredictions
+      .map(mp => {
+        const memberRanksByModel: Record<string, number> = {}
+        const memberScoresByModel: Record<string, number> = {}
+        for (const model of models) {
+          memberRanksByModel[model] = ranksByModel[model][mp.userId] ?? memberPredictions.length
+          memberScoresByModel[model] = scoresByModel[model][mp.userId] ?? 999
+        }
+        const ranks = Object.values(memberRanksByModel)
+        const avgRank = ranks.reduce((a, b) => a + b, 0) / ranks.length
+        const tally = {
+          first:  ranks.filter(r => r === 1).length,
+          second: ranks.filter(r => r === 2).length,
+          third:  ranks.filter(r => r === 3).length,
+          fourth: ranks.filter(r => r === 4).length,
+          total:  models.length,
+        }
+        return {
+          userId: mp.userId,
+          displayName: mp.displayName,
+          avgRank,
+          ranksByModel: memberRanksByModel,
+          scoresByModel: memberScoresByModel,
+          tally,
+          models,
+        }
+      })
+      .sort((a, b) => a.avgRank - b.avgRank)
+  }, [projectedLadderData, memberPredictions])
+
   // ── End predictor memos ───────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -1627,76 +1684,169 @@ export default function CompetitionPage() {
                         )}
                       </div>
 
-                      {/* Right: projected leaderboard */}
-                      <div className="lg:w-72 flex-shrink-0 p-4 lg:p-6">
-                        <p className="text-sm font-bold text-slate-700 mb-3">
-                          {predictorMode === 'auto' ? 'Projected Leaderboard' : 'Resulting Leaderboard'}
-                        </p>
-                        {predictorLeaderboard.length === 0 ? (
-                          <div className="py-8 text-center text-slate-400 text-xs">
-                            {predictorMode === 'auto' ? 'Select a model above' : 'Pick some game results to see leaderboard'}
-                          </div>
-                        ) : (
+                      {/* Right: consensus member tally (consensus mode) OR projected leaderboard (single model / games) */}
+                      <div className="lg:w-80 flex-shrink-0 p-4 lg:p-6">
+                        {predictorMode === 'auto' && selectedModel === 'consensus' ? (
+                          /* ── MEMBER CONSENSUS TALLY ── */
                           <>
-                            <div className="rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
-                              {predictorLeaderboard.map((entry, idx) => {
-                                const isMe = entry.userId === currentUser?.id
-                                const realRanked = [...memberPredictions]
-                                  .map(mp => ({ userId: mp.userId, score: totalForMember(mp, aflTeams) }))
-                                  .sort((a, b) => a.score - b.score)
-                                const realRank = realRanked.findIndex(r => r.userId === entry.userId) + 1
-                                const simRank = idx + 1
-                                const rankDelta = realRank - simRank
-                                const scoreDelta = entry.simScore - entry.realScore
-                                const bestSimScore = Math.min(...predictorLeaderboard.map(e => e.simScore))
-                                return (
-                                  <div key={entry.userId} className={`flex items-center gap-3 px-4 py-3 ${isMe ? 'bg-emerald-50/60' : 'bg-white'}`}>
-                                    <RankBadge rank={simRank} />
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className={`text-sm font-semibold truncate ${isMe ? 'text-emerald-800' : 'text-slate-900'}`}>
-                                          {entry.displayName}
-                                        </span>
-                                        {isMe && (
-                                          <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>
-                                        )}
-                                      </div>
-                                      <div className="mt-0.5">
-                                        {rankDelta > 0 ? (
-                                          <span className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600">
-                                            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" />
-                                            </svg>
-                                            +{rankDelta} rank
-                                          </span>
-                                        ) : rankDelta < 0 ? (
-                                          <span className="flex items-center gap-0.5 text-[10px] font-bold text-red-500">
-                                            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
-                                            </svg>
-                                            {rankDelta} rank
-                                          </span>
-                                        ) : (
-                                          <span className="text-[10px] text-slate-400">same rank</span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <div className="text-right flex-shrink-0">
-                                      <p className={`text-base font-black ${entry.simScore === bestSimScore ? 'text-emerald-600' : 'text-slate-900'}`}>
-                                        {entry.simScore}
-                                      </p>
-                                      {scoreDelta !== 0 && (
-                                        <p className={`text-[10px] font-bold ${scoreDelta < 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                                          {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} pts
-                                        </p>
-                                      )}
-                                      {scoreDelta === 0 && <p className="text-[10px] text-slate-400">no change</p>}
-                                    </div>
-                                  </div>
-                                )
-                              })}
+                            <div className="flex items-center justify-between mb-3">
+                              <p className="text-sm font-bold text-slate-700">League Consensus</p>
+                              <span className="text-[10px] text-slate-400">{memberConsensusData[0]?.tally.total ?? 0} models</span>
                             </div>
-                            <p className="text-xs text-slate-400 mt-2 text-center">vs current scores — lower is better</p>
+                            {memberConsensusData.length === 0 ? (
+                              <div className="py-8 text-center text-slate-400 text-xs">No predictions yet</div>
+                            ) : (
+                              <>
+                                <div className="rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
+                                  {memberConsensusData.map((entry, idx) => {
+                                    const isMe = entry.userId === currentUser?.id
+                                    const models = entry.models
+                                    const { first, second, third, fourth } = entry.tally
+                                    return (
+                                      <div key={entry.userId} className={`px-4 py-3 ${isMe ? 'bg-emerald-50/60' : 'bg-white'}`}>
+                                        <div className="flex items-center gap-3 mb-2">
+                                          <RankBadge rank={idx + 1} />
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-1.5">
+                                              <span className={`text-sm font-semibold truncate ${isMe ? 'text-emerald-800' : 'text-slate-900'}`}>
+                                                {entry.displayName}
+                                              </span>
+                                              {isMe && (
+                                                <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>
+                                              )}
+                                            </div>
+                                            <span className="text-[10px] text-slate-400">avg #{entry.avgRank.toFixed(1)}</span>
+                                          </div>
+                                          {/* Tally badges */}
+                                          <div className="flex items-center gap-1 flex-shrink-0">
+                                            {first > 0 && (
+                                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-400 text-white text-[10px] font-black">
+                                                🥇{first}
+                                              </span>
+                                            )}
+                                            {second > 0 && (
+                                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-slate-300 text-white text-[10px] font-black">
+                                                🥈{second}
+                                              </span>
+                                            )}
+                                            {third > 0 && (
+                                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-orange-400 text-white text-[10px] font-black">
+                                                🥉{third}
+                                              </span>
+                                            )}
+                                            {fourth > 0 && (
+                                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-black">
+                                                4th×{fourth}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        {/* Per-model rank chips */}
+                                        <div className="flex items-center gap-1 flex-wrap pl-11">
+                                          {models.map(model => {
+                                            const rank = entry.ranksByModel[model]
+                                            const score = entry.scoresByModel[model]
+                                            const chipClass =
+                                              rank === 1 ? 'bg-amber-400 text-white' :
+                                              rank === 2 ? 'bg-slate-300 text-white' :
+                                              rank === 3 ? 'bg-orange-400 text-white' :
+                                              rank === 4 ? 'bg-slate-100 text-slate-600' :
+                                              'bg-slate-100 text-slate-400'
+                                            return (
+                                              <span
+                                                key={model}
+                                                title={`${model}: #${rank} (${score} pts)`}
+                                                className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-[10px] font-black ${chipClass}`}
+                                              >
+                                                {rank}
+                                              </span>
+                                            )
+                                          })}
+                                          <span className="text-[10px] text-slate-400 ml-1">per model</span>
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                                <p className="text-xs text-slate-400 mt-2 text-center">
+                                  Consensus finish position across {memberConsensusData[0]?.tally.total ?? 0} Squiggle models
+                                </p>
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          /* ── SINGLE MODEL / GAMES: projected leaderboard ── */
+                          <>
+                            <p className="text-sm font-bold text-slate-700 mb-3">
+                              {predictorMode === 'auto' ? 'Projected Leaderboard' : 'Resulting Leaderboard'}
+                            </p>
+                            {predictorLeaderboard.length === 0 ? (
+                              <div className="py-8 text-center text-slate-400 text-xs">
+                                {predictorMode === 'auto' ? 'Select a model above' : 'Pick some game results to see leaderboard'}
+                              </div>
+                            ) : (
+                              <>
+                                <div className="rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
+                                  {predictorLeaderboard.map((entry, idx) => {
+                                    const isMe = entry.userId === currentUser?.id
+                                    const realRanked = [...memberPredictions]
+                                      .map(mp => ({ userId: mp.userId, score: totalForMember(mp, aflTeams) }))
+                                      .sort((a, b) => a.score - b.score)
+                                    const realRank = realRanked.findIndex(r => r.userId === entry.userId) + 1
+                                    const simRank = idx + 1
+                                    const rankDelta = realRank - simRank
+                                    const scoreDelta = entry.simScore - entry.realScore
+                                    const bestSimScore = Math.min(...predictorLeaderboard.map(e => e.simScore))
+                                    return (
+                                      <div key={entry.userId} className={`flex items-center gap-3 px-4 py-3 ${isMe ? 'bg-emerald-50/60' : 'bg-white'}`}>
+                                        <RankBadge rank={simRank} />
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-1.5">
+                                            <span className={`text-sm font-semibold truncate ${isMe ? 'text-emerald-800' : 'text-slate-900'}`}>
+                                              {entry.displayName}
+                                            </span>
+                                            {isMe && (
+                                              <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>
+                                            )}
+                                          </div>
+                                          <div className="mt-0.5">
+                                            {rankDelta > 0 ? (
+                                              <span className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600">
+                                                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" />
+                                                </svg>
+                                                +{rankDelta} rank
+                                              </span>
+                                            ) : rankDelta < 0 ? (
+                                              <span className="flex items-center gap-0.5 text-[10px] font-bold text-red-500">
+                                                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                                                </svg>
+                                                {rankDelta} rank
+                                              </span>
+                                            ) : (
+                                              <span className="text-[10px] text-slate-400">same rank</span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div className="text-right flex-shrink-0">
+                                          <p className={`text-base font-black ${entry.simScore === bestSimScore ? 'text-emerald-600' : 'text-slate-900'}`}>
+                                            {entry.simScore}
+                                          </p>
+                                          {scoreDelta !== 0 && (
+                                            <p className={`text-[10px] font-bold ${scoreDelta < 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                              {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} pts
+                                            </p>
+                                          )}
+                                          {scoreDelta === 0 && <p className="text-[10px] text-slate-400">no change</p>}
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                                <p className="text-xs text-slate-400 mt-2 text-center">vs current scores — lower is better</p>
+                              </>
+                            )}
                           </>
                         )}
                       </div>
