@@ -213,6 +213,73 @@ function ProjectedTeamRow({ team, index, projWins }: { team: string; index: numb
   )
 }
 
+interface TeamConsensus {
+  teamName: string
+  avgRank: number
+  ranksByModel: Record<string, number>
+  zoneTallies: { top4: number; finals: number; mid: number; bottom: number; total: number }
+}
+
+function ConsensusTeamRow({ data, models, index }: { data: TeamConsensus; models: string[]; index: number }) {
+  const meta = getTeamMeta(data.teamName)
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5 border-b border-slate-100 bg-white last:border-0">
+      {/* Consensus rank */}
+      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-lg text-xs font-black flex-shrink-0 ${posBadgeClass(index)}`}>
+        {index + 1}
+      </span>
+      {/* Team badge */}
+      <div className="w-9 h-9 rounded-xl flex flex-col overflow-hidden shadow-sm flex-shrink-0"
+        style={{ border: `1.5px solid ${meta.secondaryColor}40` }}>
+        <div className="flex-1 flex items-center justify-center text-[9px] font-black"
+          style={{ backgroundColor: meta.primaryColor, color: meta.textColor }}>
+          {meta.shortName}
+        </div>
+        <div className="h-1.5" style={{ backgroundColor: meta.secondaryColor }} />
+      </div>
+      {/* Team name + avg rank */}
+      <div className="flex-1 min-w-0">
+        <span className="text-sm font-semibold text-slate-900 leading-tight truncate block">{data.teamName}</span>
+        <span className="text-[10px] text-slate-400">avg #{data.avgRank.toFixed(1)}</span>
+      </div>
+      {/* Per-model rank chips */}
+      <div className="flex items-center gap-1 flex-shrink-0 flex-wrap justify-end" style={{ maxWidth: '140px' }}>
+        {models.map(model => {
+          const rank = data.ranksByModel[model]
+          if (rank == null) return null
+          return (
+            <span
+              key={model}
+              title={`${model}: #${rank}`}
+              className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-[10px] font-black ${posBadgeClass(rank - 1)}`}
+            >
+              {rank}
+            </span>
+          )
+        })}
+      </div>
+      {/* Zone summary */}
+      <div className="flex-shrink-0 w-16 text-right">
+        {data.zoneTallies.top4 > 0 && (
+          <span className="text-[10px] font-bold text-emerald-600 block">
+            {data.zoneTallies.top4}/{data.zoneTallies.total} Top 4
+          </span>
+        )}
+        {data.zoneTallies.finals > 0 && data.zoneTallies.top4 === 0 && (
+          <span className="text-[10px] font-bold text-blue-600 block">
+            {data.zoneTallies.finals}/{data.zoneTallies.total} Finals
+          </span>
+        )}
+        {data.zoneTallies.bottom > 0 && data.zoneTallies.top4 === 0 && data.zoneTallies.finals === 0 && (
+          <span className="text-[10px] font-bold text-red-500 block">
+            {data.zoneTallies.bottom}/{data.zoneTallies.total} Bottom
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function CompetitionPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -226,7 +293,7 @@ export default function CompetitionPage() {
   const [ladderView, setLadderView] = useState<'ladder' | 'spotlight' | 'compare' | 'predictor'>('compare')
   const [selectedTeam, setSelectedTeam] = useState<string>('')
   const [predictorMode, setPredictorMode] = useState<'auto' | 'games'>('auto')
-  const [selectedModel, setSelectedModel] = useState<string>('squiggle')
+  const [selectedModel, setSelectedModel] = useState<string>('consensus')
   const [gamePicks, setGamePicks] = useState<Record<string, string>>({})
 
   const { data: compData, isLoading: compLoading } = useQuery({
@@ -319,19 +386,49 @@ export default function CompetitionPage() {
     return [...new Set((projectedLadderData.projections as any[]).map((p: any) => p.source as string))]
   }, [projectedLadderData])
 
-  // Projected team order for the selected model
+  // Consensus data: aggregate all models, sorted by average rank
+  const consensusData = useMemo((): TeamConsensus[] => {
+    if (!projectedLadderData?.projections?.length) return []
+    const projections = projectedLadderData.projections as any[]
+    const teams = [...new Set(projections.map((p: any) => p.teamName as string))]
+    const models = [...new Set(projections.map((p: any) => p.source as string))]
+
+    return teams.map(teamName => {
+      const teamProjs = projections.filter((p: any) => p.teamName === teamName)
+      const ranks = teamProjs.map((p: any) => p.rank as number)
+      const avgRank = ranks.reduce((a, b) => a + b, 0) / ranks.length
+
+      const ranksByModel: Record<string, number> = {}
+      for (const p of teamProjs) ranksByModel[p.source] = p.rank
+
+      const zoneTallies = {
+        top4:   ranks.filter(r => r <= 4).length,
+        finals: ranks.filter(r => r >= 5 && r <= 10).length,
+        mid:    ranks.filter(r => r >= 11 && r <= 14).length,
+        bottom: ranks.filter(r => r >= 15).length,
+        total:  models.length,
+      }
+
+      return { teamName, avgRank, ranksByModel, zoneTallies }
+    }).sort((a, b) => a.avgRank - b.avgRank)
+  }, [projectedLadderData])
+
+  // Projected team order — consensus = avg rank sort; single model = that model's rank
   const projectedTeamOrder = useMemo((): string[] => {
     if (!projectedLadderData?.projections?.length) return []
+    if (selectedModel === 'consensus') {
+      return consensusData.map(d => d.teamName)
+    }
     return (projectedLadderData.projections as any[])
       .filter((p: any) => p.source === selectedModel)
       .sort((a: any, b: any) => a.rank - b.rank)
       .map((p: any) => p.teamName as string)
-  }, [projectedLadderData, selectedModel])
+  }, [projectedLadderData, selectedModel, consensusData])
 
-  // Auto-select first available model when data loads
+  // Auto-select consensus as default; only fall back to first model if consensus has no data
   useEffect(() => {
-    if (availableModels.length > 0 && !availableModels.includes(selectedModel)) {
-      setSelectedModel(availableModels[0])
+    if (selectedModel !== 'consensus' && availableModels.length > 0 && !availableModels.includes(selectedModel)) {
+      setSelectedModel('consensus')
     }
   }, [availableModels, selectedModel])
 
@@ -1314,14 +1411,15 @@ export default function CompetitionPage() {
                       </div>
                       {predictorMode === 'auto' && availableModels.length > 0 && (
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-500 font-medium">Model:</span>
+                          <span className="text-xs text-slate-500 font-medium">View:</span>
                           <select
                             value={selectedModel}
                             onChange={e => setSelectedModel(e.target.value)}
                             className="text-xs font-semibold rounded-lg border border-slate-200 px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           >
+                            <option value="consensus">Consensus (all models)</option>
                             {availableModels.map(m => (
-                              <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>
+                              <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)} only</option>
                             ))}
                           </select>
                         </div>
@@ -1355,8 +1453,40 @@ export default function CompetitionPage() {
                               <div className="py-12 text-center text-slate-400 text-sm">
                                 {availableModels.length === 0
                                   ? 'Squiggle projections not yet available for this season.'
-                                  : 'Select a model to see projections.'}
+                                  : 'Select a view above.'}
                               </div>
+                            ) : selectedModel === 'consensus' ? (
+                              <>
+                                {/* Consensus view: all models aggregated */}
+                                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                                  <p className="text-sm font-bold text-slate-700">Consensus — {availableModels.length} models</p>
+                                  <div className="flex gap-2 ml-auto">
+                                    {/* Legend */}
+                                    <span className="flex items-center gap-1 text-[10px] text-slate-500">
+                                      <span className="w-4 h-4 rounded bg-emerald-500 inline-block" /> Top 4
+                                    </span>
+                                    <span className="flex items-center gap-1 text-[10px] text-slate-500">
+                                      <span className="w-4 h-4 rounded bg-blue-100 inline-block" /> Finals
+                                    </span>
+                                    <span className="flex items-center gap-1 text-[10px] text-slate-500">
+                                      <span className="w-4 h-4 rounded bg-red-100 inline-block" /> Bottom
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 overflow-hidden mb-2">
+                                  {consensusData.map((d, i) => (
+                                    <ConsensusTeamRow
+                                      key={d.teamName}
+                                      data={d}
+                                      models={availableModels}
+                                      index={i}
+                                    />
+                                  ))}
+                                </div>
+                                <p className="text-xs text-slate-400 text-center">
+                                  Each chip shows a model's predicted finish position — colour = zone
+                                </p>
+                              </>
                             ) : (
                               <>
                                 <div className="rounded-xl border border-slate-200 overflow-hidden mb-2">
@@ -1370,7 +1500,7 @@ export default function CompetitionPage() {
                                   ))}
                                 </div>
                                 <p className="text-xs text-slate-400 text-center">
-                                  Squiggle model projection — projected season-end ladder
+                                  {selectedModel} model projection — projected season-end ladder
                                 </p>
                               </>
                             )}
