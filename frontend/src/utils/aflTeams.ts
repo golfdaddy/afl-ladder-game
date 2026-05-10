@@ -40,8 +40,8 @@ export const getTeamMeta = (name: string): AFLTeamMeta =>
 
 export const zoneConfig = [
   { label: 'Top 4',  positions: '1–4',   range: [0, 3],  text: 'text-emerald-600', dot: 'bg-emerald-500' },
-  { label: 'Finals', positions: '5–10',  range: [4, 9],  text: 'text-blue-600',    dot: 'bg-blue-500'   },
-  { label: 'Mid',    positions: '11–14', range: [10, 13],text: 'text-slate-500',   dot: 'bg-slate-400'  },
+  { label: 'Finals', positions: '5–8',   range: [4, 7],  text: 'text-blue-600',    dot: 'bg-blue-500'   },
+  { label: 'Mid',    positions: '9–14',  range: [8, 13], text: 'text-slate-500',   dot: 'bg-slate-400'  },
   { label: 'Bottom', positions: '15–18', range: [14, 17],text: 'text-red-500',     dot: 'bg-red-500'    },
 ]
 
@@ -49,9 +49,9 @@ export const getZone = (i: number) =>
   zoneConfig.find((z) => i >= z.range[0] && i <= z.range[1])!
 
 export function posBadgeClass(i: number) {
-  if (i < 4)              return 'bg-emerald-500 text-white'
-  if (i >= 4 && i < 10)  return 'bg-blue-100 text-blue-700'
-  if (i >= 10 && i < 14) return 'bg-slate-100 text-slate-600'
+  if (i < 4)             return 'bg-emerald-500 text-white'
+  if (i >= 4 && i < 8)  return 'bg-blue-100 text-blue-700'
+  if (i >= 8 && i < 14) return 'bg-slate-100 text-slate-600'
   return 'bg-red-100 text-red-600'
 }
 

@@ -228,8 +228,8 @@ export default function DashboardPage() {
       for (const p of teamProjs) ranksByModel[p.source] = p.rank
       const zoneTallies = {
         top4: ranks.filter(r => r <= 4).length,
-        finals: ranks.filter(r => r >= 5 && r <= 10).length,
-        mid: ranks.filter(r => r >= 11 && r <= 14).length,
+        finals: ranks.filter(r => r >= 5 && r <= 8).length,
+        mid: ranks.filter(r => r >= 9 && r <= 14).length,
         bottom: ranks.filter(r => r >= 15).length,
         total: models.length,
       }
