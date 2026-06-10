@@ -313,49 +313,73 @@ export default function FullSeasonSimulator({
   // ── Finals Bracket Computation ───────────────────────────────────────────────
 
   const finalsState = useMemo(() => {
-    const top8 = simRegularSeasonLadder.slice(0, 8).map(t => t.teamName)
+    const top10 = simRegularSeasonLadder.slice(0, 10).map(t => t.teamName)
+
+    // A pick only counts while it matches one of the current participants,
+    // so changing an upstream result invalidates downstream picks.
+    const pickOf = (matchId: string, a: string | null, b: string | null) => {
+      const p = finalsPicks[matchId] || null
+      return p && a && b && (p === a || p === b) ? p : null
+    }
+
+    // 2026 Wildcard Round: WC1 = 7v10, WC2 = 8v9 — winners take the last two spots
+    const wc1w = pickOf('WC1', top10[6] || null, top10[9] || null)
+    const wc1l = wc1w ? (wc1w === top10[6] ? top10[9] : top10[6]) : null
+    const wc2w = pickOf('WC2', top10[7] || null, top10[8] || null)
+    const wc2l = wc2w ? (wc2w === top10[7] ? top10[8] : top10[7]) : null
+
+    // Higher-ranked wildcard winner is re-seeded 7th, the other 8th
+    let seed7: string | null = null
+    let seed8: string | null = null
+    if (wc1w && wc2w) {
+      if (top10.indexOf(wc1w) < top10.indexOf(wc2w)) { seed7 = wc1w; seed8 = wc2w }
+      else { seed7 = wc2w; seed8 = wc1w }
+    }
 
     // AFL final eight: QF1 = 1v4, QF2 = 2v3, EF1 = 5v8, EF2 = 6v7
-    const qf1w = finalsPicks['QF1'] || null
-    const qf1l = qf1w ? (qf1w === top8[0] ? top8[3] : top8[0]) : null
-    const qf2w = finalsPicks['QF2'] || null
-    const qf2l = qf2w ? (qf2w === top8[1] ? top8[2] : top8[1]) : null
-    const ef1w = finalsPicks['EF1'] || null
-    const ef1l = ef1w ? (ef1w === top8[4] ? top8[7] : top8[4]) : null
-    const ef2w = finalsPicks['EF2'] || null
-    const ef2l = ef2w ? (ef2w === top8[5] ? top8[6] : top8[5]) : null
+    const qf1w = pickOf('QF1', top10[0] || null, top10[3] || null)
+    const qf1l = qf1w ? (qf1w === top10[0] ? top10[3] : top10[0]) : null
+    const qf2w = pickOf('QF2', top10[1] || null, top10[2] || null)
+    const qf2l = qf2w ? (qf2w === top10[1] ? top10[2] : top10[1]) : null
+    const ef1w = pickOf('EF1', top10[4] || null, seed8)
+    const ef1l = ef1w ? (ef1w === top10[4] ? seed8 : top10[4]) : null
+    const ef2w = pickOf('EF2', top10[5] || null, seed7)
+    const ef2l = ef2w ? (ef2w === top10[5] ? seed7 : top10[5]) : null
 
     // SF1 = QF1 loser v EF1 winner, SF2 = QF2 loser v EF2 winner
-    const sf1w = (qf1l && ef1w) ? (finalsPicks['SF1'] || null) : null
+    const sf1w = pickOf('SF1', qf1l, ef1w)
     const sf1l = sf1w ? (sf1w === qf1l ? ef1w : qf1l) : null
-    const sf2w = (qf2l && ef2w) ? (finalsPicks['SF2'] || null) : null
+    const sf2w = pickOf('SF2', qf2l, ef2w)
     const sf2l = sf2w ? (sf2w === qf2l ? ef2w : qf2l) : null
 
     // PF1 = QF1 winner v SF2 winner, PF2 = QF2 winner v SF1 winner
-    const pf1w = (qf1w && sf2w) ? (finalsPicks['PF1'] || null) : null
+    const pf1w = pickOf('PF1', qf1w, sf2w)
     const pf1l = pf1w ? (pf1w === qf1w ? sf2w : qf1w) : null
-    const pf2w = (qf2w && sf1w) ? (finalsPicks['PF2'] || null) : null
+    const pf2w = pickOf('PF2', qf2w, sf1w)
     const pf2l = pf2w ? (pf2w === qf2w ? sf1w : qf2w) : null
 
-    const gfw = (pf1w && pf2w) ? (finalsPicks['GF'] || null) : null
+    const gfw = pickOf('GF', pf1w, pf2w)
     const gfl = gfw ? (gfw === pf1w ? pf2w : pf1w) : null
 
-    return { top8, qf1w, qf1l, qf2w, qf2l, ef1w, ef1l, ef2w, ef2l, sf1w, sf1l, sf2w, sf2l, pf1w, pf1l, pf2w, pf2l, gfw, gfl }
+    return { top10, wc1w, wc1l, wc2w, wc2l, seed7, seed8, qf1w, qf1l, qf2w, qf2l, ef1w, ef1l, ef2w, ef2l, sf1w, sf1l, sf2w, sf2l, pf1w, pf1l, pf2w, pf2l, gfw, gfl }
   }, [finalsPicks, simRegularSeasonLadder])
 
   // ── Final Standings ──────────────────────────────────────────────────────────
 
   const finalStandings = useMemo((): string[] | null => {
-    const { top8, gfw, gfl, pf1l, pf2l, sf1l, sf2l, ef1l, ef2l } = finalsState
-    if (!gfw || !gfl || !pf1l || !pf2l || !sf1l || !sf2l || !ef1l || !ef2l) return null
+    const { top10, gfw, gfl, pf1l, pf2l, sf1l, sf2l, ef1l, ef2l, wc1l, wc2l, seed7, seed8 } = finalsState
+    if (!gfw || !gfl || !pf1l || !pf2l || !sf1l || !sf2l || !ef1l || !ef2l || !wc1l || !wc2l || !seed7 || !seed8) return null
 
-    const bottom10 = simRegularSeasonLadder.slice(8).map(t => t.teamName)
+    const rest = simRegularSeasonLadder.slice(10).map(t => t.teamName)
 
-    const prelimLosers = [pf1l, pf2l].sort((a, b) => top8.indexOf(a) - top8.indexOf(b))
-    const semiLosers = [sf1l, sf2l].sort((a, b) => top8.indexOf(a) - top8.indexOf(b))
-    const elimLosers = [ef1l, ef2l].sort((a, b) => top8.indexOf(a) - top8.indexOf(b))
+    // Effective top 8 after wildcard re-seeding — used to order eliminated teams
+    const effTop8 = [...top10.slice(0, 6), seed7, seed8]
+    const prelimLosers = [pf1l, pf2l].sort((a, b) => effTop8.indexOf(a) - effTop8.indexOf(b))
+    const semiLosers = [sf1l, sf2l].sort((a, b) => effTop8.indexOf(a) - effTop8.indexOf(b))
+    const elimLosers = [ef1l, ef2l].sort((a, b) => effTop8.indexOf(a) - effTop8.indexOf(b))
+    const wcLosers = [wc1l, wc2l].sort((a, b) => top10.indexOf(a) - top10.indexOf(b))
 
-    return [gfw, gfl, prelimLosers[0], prelimLosers[1], semiLosers[0], semiLosers[1], elimLosers[0], elimLosers[1], ...bottom10]
+    return [gfw, gfl, prelimLosers[0], prelimLosers[1], semiLosers[0], semiLosers[1], elimLosers[0], elimLosers[1], wcLosers[0], wcLosers[1], ...rest]
   }, [finalsState, simRegularSeasonLadder])
 
   // ── Simulated Leaderboard ────────────────────────────────────────────────────
@@ -414,7 +438,7 @@ export default function FullSeasonSimulator({
     )
   }
 
-  const { top8, qf1w, qf1l, qf2w, qf2l, ef1w, ef1l, ef2w, ef2l, sf1w, sf1l, sf2w, sf2l, pf1w, pf1l, pf2w, pf2l, gfw, gfl } = finalsState
+  const { top10, wc1w, wc1l, wc2w, wc2l, seed7, seed8, qf1w, qf1l, qf2w, qf2l, ef1w, ef1l, ef2w, ef2l, sf1w, sf1l, sf2w, sf2l, pf1w, pf1l, pf2w, pf2l, gfw, gfl } = finalsState
 
   return (
     <div className="flex flex-col lg:flex-row gap-0 lg:divide-x lg:divide-slate-100">
@@ -546,9 +570,9 @@ export default function FullSeasonSimulator({
         {showFinals && (
           <div className="space-y-5">
             <div>
-              <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-1">Top 8 Seeds</p>
+              <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-1">Top 10 Seeds</p>
               <div className="flex flex-wrap gap-1.5 mb-4">
-                {top8.map((team, i) => {
+                {top10.map((team, i) => {
                   const meta = getTeamMeta(team)
                   return (
                     <div key={team} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200">
@@ -564,52 +588,78 @@ export default function FullSeasonSimulator({
               </div>
             </div>
 
-            {/* Week 1 */}
+            {/* Week 1 — Wildcard Round (new in 2026) */}
             <div>
-              <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Week 1 — Qualifying & Elimination Finals</p>
+              <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Week 1 — Wildcard Round</p>
+              <p className="text-[10px] text-slate-400 mb-2">7th–10th play off for the last two finals spots. The higher-ranked winner is re-seeded 7th, the other 8th. Top six rest this week.</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <FinalsMatchCard
-                  matchId="QF1"
-                  label={`QF1 — Seed 1 vs Seed 4`}
-                  teamA={top8[0] || null}
-                  teamB={top8[3] || null}
-                  picked={finalsPicks['QF1'] || null}
+                  matchId="WC1"
+                  label={`WC1 — Seed 7 vs Seed 10`}
+                  teamA={top10[6] || null}
+                  teamB={top10[9] || null}
+                  picked={wc1w}
                   onPick={handleFinalsPick}
-                  disabled={top8.length < 4}
+                  disabled={top10.length < 10}
                 />
                 <FinalsMatchCard
-                  matchId="QF2"
-                  label={`QF2 — Seed 2 vs Seed 3`}
-                  teamA={top8[1] || null}
-                  teamB={top8[2] || null}
-                  picked={finalsPicks['QF2'] || null}
+                  matchId="WC2"
+                  label={`WC2 — Seed 8 vs Seed 9`}
+                  teamA={top10[7] || null}
+                  teamB={top10[8] || null}
+                  picked={wc2w}
                   onPick={handleFinalsPick}
-                  disabled={top8.length < 4}
-                />
-                <FinalsMatchCard
-                  matchId="EF1"
-                  label={`EF1 — Seed 5 vs Seed 8`}
-                  teamA={top8[4] || null}
-                  teamB={top8[7] || null}
-                  picked={finalsPicks['EF1'] || null}
-                  onPick={handleFinalsPick}
-                  disabled={top8.length < 8}
-                />
-                <FinalsMatchCard
-                  matchId="EF2"
-                  label={`EF2 — Seed 6 vs Seed 7`}
-                  teamA={top8[5] || null}
-                  teamB={top8[6] || null}
-                  picked={finalsPicks['EF2'] || null}
-                  onPick={handleFinalsPick}
-                  disabled={top8.length < 7}
+                  disabled={top10.length < 9}
                 />
               </div>
             </div>
 
             {/* Week 2 */}
             <div>
-              <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Week 2 — Semi Finals</p>
+              <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Week 2 — Qualifying & Elimination Finals</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <FinalsMatchCard
+                  matchId="QF1"
+                  label={`QF1 — Seed 1 vs Seed 4`}
+                  teamA={top10[0] || null}
+                  teamB={top10[3] || null}
+                  picked={qf1w}
+                  onPick={handleFinalsPick}
+                  disabled={top10.length < 4}
+                />
+                <FinalsMatchCard
+                  matchId="QF2"
+                  label={`QF2 — Seed 2 vs Seed 3`}
+                  teamA={top10[1] || null}
+                  teamB={top10[2] || null}
+                  picked={qf2w}
+                  onPick={handleFinalsPick}
+                  disabled={top10.length < 4}
+                />
+                <FinalsMatchCard
+                  matchId="EF1"
+                  label={`EF1 — Seed 5 vs WC winner (8th)`}
+                  teamA={top10[4] || null}
+                  teamB={seed8}
+                  picked={ef1w}
+                  onPick={handleFinalsPick}
+                  disabled={!seed8}
+                />
+                <FinalsMatchCard
+                  matchId="EF2"
+                  label={`EF2 — Seed 6 vs WC winner (7th)`}
+                  teamA={top10[5] || null}
+                  teamB={seed7}
+                  picked={ef2w}
+                  onPick={handleFinalsPick}
+                  disabled={!seed7}
+                />
+              </div>
+            </div>
+
+            {/* Week 3 */}
+            <div>
+              <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Week 3 — Semi Finals</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <FinalsMatchCard
                   matchId="SF1"
@@ -632,9 +682,9 @@ export default function FullSeasonSimulator({
               </div>
             </div>
 
-            {/* Week 3 */}
+            {/* Week 4 */}
             <div>
-              <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Week 3 — Preliminary Finals</p>
+              <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Week 4 — Preliminary Finals</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <FinalsMatchCard
                   matchId="PF1"
@@ -657,9 +707,9 @@ export default function FullSeasonSimulator({
               </div>
             </div>
 
-            {/* Week 4 - Grand Final */}
+            {/* Week 5 - Grand Final */}
             <div>
-              <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Week 4 — Grand Final</p>
+              <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Week 5 — Grand Final</p>
               <FinalsMatchCard
                 matchId="GF"
                 label={`Grand Final`}
@@ -672,7 +722,7 @@ export default function FullSeasonSimulator({
             </div>
 
             {/* Finals elimination summary */}
-            {(ef1l || ef2l || sf1l || sf2l || pf1l || pf2l || gfl) && (
+            {(wc1l || wc2l || ef1l || ef2l || sf1l || sf2l || pf1l || pf2l || gfl) && (
               <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-wide mb-2">Eliminated</p>
                 <div className="space-y-1">
@@ -681,8 +731,10 @@ export default function FullSeasonSimulator({
                   {pf2l && <div className="flex items-center gap-2 text-[10px] text-slate-600"><span className="font-bold text-slate-400 w-4">3/4</span><TeamBadge teamName={pf2l} size="sm" /><span>{pf2l}</span><span className="text-slate-400">— Prelim loser</span></div>}
                   {sf1l && <div className="flex items-center gap-2 text-[10px] text-slate-600"><span className="font-bold text-slate-400 w-4">5/6</span><TeamBadge teamName={sf1l} size="sm" /><span>{sf1l}</span><span className="text-slate-400">— Semi loser</span></div>}
                   {sf2l && <div className="flex items-center gap-2 text-[10px] text-slate-600"><span className="font-bold text-slate-400 w-4">5/6</span><TeamBadge teamName={sf2l} size="sm" /><span>{sf2l}</span><span className="text-slate-400">— Semi loser</span></div>}
-                  {ef2l && <div className="flex items-center gap-2 text-[10px] text-slate-600"><span className="font-bold text-slate-400 w-4">7th</span><TeamBadge teamName={ef2l} size="sm" /><span>{ef2l}</span><span className="text-slate-400">— Elim loser</span></div>}
-                  {ef1l && <div className="flex items-center gap-2 text-[10px] text-slate-600"><span className="font-bold text-slate-400 w-4">8th</span><TeamBadge teamName={ef1l} size="sm" /><span>{ef1l}</span><span className="text-slate-400">— Elim loser</span></div>}
+                  {ef1l && <div className="flex items-center gap-2 text-[10px] text-slate-600"><span className="font-bold text-slate-400 w-4">7/8</span><TeamBadge teamName={ef1l} size="sm" /><span>{ef1l}</span><span className="text-slate-400">— Elim loser</span></div>}
+                  {ef2l && <div className="flex items-center gap-2 text-[10px] text-slate-600"><span className="font-bold text-slate-400 w-4">7/8</span><TeamBadge teamName={ef2l} size="sm" /><span>{ef2l}</span><span className="text-slate-400">— Elim loser</span></div>}
+                  {wc1l && <div className="flex items-center gap-2 text-[10px] text-slate-600"><span className="font-bold text-slate-400 w-4">9/10</span><TeamBadge teamName={wc1l} size="sm" /><span>{wc1l}</span><span className="text-slate-400">— Wildcard loser</span></div>}
+                  {wc2l && <div className="flex items-center gap-2 text-[10px] text-slate-600"><span className="font-bold text-slate-400 w-4">9/10</span><TeamBadge teamName={wc2l} size="sm" /><span>{wc2l}</span><span className="text-slate-400">— Wildcard loser</span></div>}
                 </div>
               </div>
             )}
