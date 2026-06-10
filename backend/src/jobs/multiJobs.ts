@@ -1,3 +1,4 @@
+import { db } from '../db'
 import { MultiModel } from '../models/multi'
 import { MultiPropsModel } from '../models/multiProps'
 import { SeasonModel } from '../models/season'
@@ -31,6 +32,16 @@ export async function runMultiJobs(): Promise<void> {
     const ingested = await MultiPropsModel.ingestPlayerStats(season.year)
     if (ingested > 0) {
       console.log(`[Multi] Ingested player stats for ${ingested} matches`)
+    }
+
+    // Refresh the player directory (listed positions, club moves) when it's
+    // empty or stale — squads barely change midweek, daily is plenty
+    const dirState = await db.query(`SELECT COUNT(*)::int AS count, MAX(updated_at) AS latest FROM multi_players`)
+    const { count, latest } = dirState.rows[0]
+    const stale = !latest || Date.now() - new Date(latest).getTime() > 24 * 60 * 60 * 1000
+    if (count === 0 || stale) {
+      const upserted = await MultiPropsModel.refreshPlayerDirectory(season.year)
+      console.log(`[Multi] Player directory refreshed (${upserted} players)`)
     }
 
     const settled = await MultiModel.settleBets(season.id, season.year)

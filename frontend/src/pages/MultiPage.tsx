@@ -44,8 +44,19 @@ interface PropPlayer {
   playerId: string
   playerName: string
   team: string
+  listedPosition: string | null
   disposals: { line: number; overOdds: number; underOdds: number; avg: number } | null
   anytimeGoal: { odds: number; avg: number } | null
+}
+
+const POSITION_LABELS: Record<string, string> = {
+  MIDFIELDER: 'MID',
+  MIDFIELDER_FORWARD: 'MID/FWD',
+  MEDIUM_FORWARD: 'FWD',
+  KEY_FORWARD: 'KEY FWD',
+  MEDIUM_DEFENDER: 'DEF',
+  KEY_DEFENDER: 'KEY DEF',
+  RUCK: 'RUCK',
 }
 
 interface GamePropsData {
@@ -428,7 +439,14 @@ export default function MultiPage() {
                                           <div key={player.playerId} className="px-4 py-2 flex items-center gap-2 bg-white">
                                             <TeamChip teamName={player.team} />
                                             <div className="flex-1 min-w-0">
-                                              <p className="text-xs font-semibold text-slate-800 truncate">{player.playerName}</p>
+                                              <p className="text-xs font-semibold text-slate-800 truncate">
+                                                {player.playerName}
+                                                {player.listedPosition && (
+                                                  <span className="ml-1.5 px-1 py-0.5 rounded bg-slate-100 text-slate-500 text-[9px] font-black align-middle">
+                                                    {POSITION_LABELS[player.listedPosition] || player.listedPosition}
+                                                  </span>
+                                                )}
+                                              </p>
                                               <p className="text-[10px] text-slate-400">
                                                 {player.disposals ? `${player.disposals.avg} disp avg` : ''}
                                                 {player.disposals && player.anytimeGoal ? ' · ' : ''}

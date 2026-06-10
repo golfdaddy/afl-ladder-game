@@ -42,6 +42,28 @@ export interface AflPlayerGameStats {
   teamInternal: string
   disposals: number
   goals: number
+  kicks: number
+  handballs: number
+  marks: number
+  tackles: number
+  hitouts: number
+  behinds: number
+  goalAssists: number
+  clearances: number
+  dreamTeamPoints: number
+  matchPosition: string | null
+}
+
+export interface AflSquadPlayer {
+  playerId: string
+  playerName: string
+  teamInternal: string
+  listedPosition: string | null
+  jumperNumber: number | null
+  heightCm: number | null
+  weightKg: number | null
+  dateOfBirth: string | null
+  debutYear: string | null
 }
 
 function request<T>(options: { hostname: string; path: string; method?: string; headers?: Record<string, string> }): Promise<T> {
@@ -153,16 +175,69 @@ export class AflStatsService {
         const candidates = [row.player?.player?.player, row.player?.player, row.player]
         const p = candidates.find(c => c && c.playerId)
         const stats = row.playerStats?.stats || row.stats || {}
+        // Match-day position lives on the outer player wrapper (e.g. HFFL, RK, INT)
+        const positionCandidates = [row.player?.player?.position, row.player?.position]
         return {
           playerId: p?.playerId || '',
           playerName: p ? `${p.playerName?.givenName || ''} ${p.playerName?.surname || ''}`.trim() : '',
           teamInternal,
           disposals: Number(stats.disposals ?? 0),
           goals: Number(stats.goals ?? 0),
+          kicks: Number(stats.kicks ?? 0),
+          handballs: Number(stats.handballs ?? 0),
+          marks: Number(stats.marks ?? 0),
+          tackles: Number(stats.tackles ?? 0),
+          hitouts: Number(stats.hitouts ?? 0),
+          behinds: Number(stats.behinds ?? 0),
+          goalAssists: Number(stats.goalAssists ?? 0),
+          clearances: Number(stats.clearances?.totalClearances ?? 0),
+          dreamTeamPoints: Number(stats.dreamTeamPoints ?? 0),
+          matchPosition: positionCandidates.find(v => typeof v === 'string') || null,
         }
       }).filter(p => p.playerId)
 
     return [...mapSide(data.homeTeamPlayerStats, homeTeam), ...mapSide(data.awayTeamPlayerStats, awayTeam)]
+  }
+
+  /** Map of internal team name -> AFL API team id, derived from the season fixture. */
+  static async fetchTeamIds(year: number): Promise<Map<string, number>> {
+    const compSeasonId = await this.getCompSeasonId(year)
+    const data = await request<{ matches: Array<any> }>({
+      hostname: 'aflapi.afl.com.au',
+      path: `/afl/v2/matches?competitionId=1&compSeasonId=${compSeasonId}&pageSize=300`,
+    })
+    const ids = new Map<string, number>()
+    for (const m of data.matches || []) {
+      for (const side of [m.home, m.away]) {
+        const name = side?.team?.name
+        const id = side?.team?.id
+        if (name && id) ids.set(AFL_TO_INTERNAL[name] || name, id)
+      }
+    }
+    return ids
+  }
+
+  /** Full club squad with listed positions and bio details. */
+  static async fetchTeamSquad(year: number, teamId: number, teamInternal: string): Promise<AflSquadPlayer[]> {
+    const compSeasonId = await this.getCompSeasonId(year)
+    const data = await request<{ squad: { players: Array<any> } }>({
+      hostname: 'aflapi.afl.com.au',
+      path: `/afl/v2/squads?compSeasonId=${compSeasonId}&teamId=${teamId}`,
+    })
+    return (data.squad?.players || []).map(entry => {
+      const p = entry.player || {}
+      return {
+        playerId: p.providerId || '',
+        playerName: `${p.firstName || ''} ${p.surname || ''}`.trim(),
+        teamInternal,
+        listedPosition: entry.position || null,
+        jumperNumber: entry.jumperNumber ?? null,
+        heightCm: p.heightInCm ?? null,
+        weightKg: p.weightInKg || null,
+        dateOfBirth: p.dateOfBirth || null,
+        debutYear: p.debutYear || null,
+      }
+    }).filter(p => p.playerId)
   }
 
   /** Polite delay helper for backfills. */

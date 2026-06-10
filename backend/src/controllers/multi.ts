@@ -69,4 +69,12 @@ export class MultiController {
     const leaderboard = await MultiModel.getLeaderboard(season.id)
     res.json({ leaderboard })
   }
+
+  static async getPlayers(req: AuthRequest, res: Response) {
+    const season = await requireSeason(res)
+    if (!season) return
+    const team = typeof req.query.team === 'string' && req.query.team.length > 0 ? req.query.team : undefined
+    const players = await MultiPropsModel.getPlayerDirectory(season.year, team)
+    res.json({ players, seasonYear: season.year })
+  }
 }
