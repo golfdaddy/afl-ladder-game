@@ -262,11 +262,73 @@ export class SquiggleService {
           complete: g.complete,
           date: g.date,
           venue: g.venue,
-          hprob: g.hprob,
+          hprob: g.hprob ?? (g as any).hconfidence ?? null,
           is_final: g.is_final,
         })),
       }
     })
+  }
+
+  // 5-minute cache so markets/bet placement don't hammer Squiggle's tips endpoint
+  private static tipsCache: { year: number; fetchedAt: number; probs: Map<number, number> } | null = null
+
+  /**
+   * Home-team win probabilities (0–100) per game id, from Squiggle model tips.
+   * Uses the 'Aggregate' source when present, otherwise the mean of all models.
+   */
+  static async fetchHomeProbabilities(year: number): Promise<Map<number, number>> {
+    const now = Date.now()
+    if (this.tipsCache && this.tipsCache.year === year && now - this.tipsCache.fetchedAt < 5 * 60 * 1000) {
+      return this.tipsCache.probs
+    }
+
+    const url = `${SQUIGGLE_BASE}/?q=tips;year=${year}`
+    console.log(`[Squiggle] Fetching tips for ${year}: ${url}`)
+    const data = await fetchJson<{ tips: Array<{ gameid: number; source: string; hconfidence: string | number | null }> }>(url)
+
+    const sums = new Map<number, { sum: number; count: number; aggregate: number | null }>()
+    for (const tip of data.tips || []) {
+      const h = tip.hconfidence == null ? null : Number(tip.hconfidence)
+      if (h == null || Number.isNaN(h)) continue
+      const entry = sums.get(tip.gameid) || { sum: 0, count: 0, aggregate: null }
+      entry.sum += h
+      entry.count++
+      if (tip.source === 'Aggregate') entry.aggregate = h
+      sums.set(tip.gameid, entry)
+    }
+
+    const probs = new Map<number, number>()
+    for (const [gameId, entry] of sums) {
+      probs.set(gameId, entry.aggregate ?? entry.sum / entry.count)
+    }
+    this.tipsCache = { year, fetchedAt: now, probs }
+    return probs
+  }
+
+  /**
+   * Fetch completed games for the year — used to settle Multi bets.
+   * winnerName is null for a draw.
+   */
+  static async fetchCompletedGames(year: number): Promise<Array<{
+    id: number
+    round: number
+    hteamName: string
+    ateamName: string
+    winnerName: string | null
+  }>> {
+    const url = `${SQUIGGLE_BASE}/?q=games;year=${year};complete=100`
+    console.log(`[Squiggle] Fetching completed games: ${url}`)
+
+    const data = await fetchJson<SquiggleGamesResponse & { games: Array<{ winner: string | null }> }>(url)
+    if (!data.games || data.games.length === 0) return []
+
+    return (data.games as any[]).map(g => ({
+      id: g.id,
+      round: g.round,
+      hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
+      ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
+      winnerName: g.winner ? (SQUIGGLE_TO_INTERNAL[g.winner] || g.winner) : null,
+    }))
   }
 
   /** Returns the internal→squiggle name map for debugging */

@@ -7,6 +7,7 @@ import { db } from './db';
 import { runMigrations } from './migrations/run';
 import { syncLadderFromSquiggle } from './jobs/ladderSync';
 import { runFantasySyncJobs } from './jobs/fantasySync';
+import { runMultiJobs } from './jobs/multiJobs';
 
 dotenv.config();
 
@@ -37,6 +38,7 @@ import leaderboardRoutes from './routes/leaderboards';
 import adminRoutes from './routes/admin';
 import seasonsRoutes from './routes/seasons';
 import fantasyRoutes from './routes/fantasy';
+import multiRoutes from './routes/multi';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/predictions', predictionsRoutes);
@@ -45,6 +47,7 @@ app.use('/api/leaderboards', leaderboardRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/seasons', seasonsRoutes);
 app.use('/api/fantasy', fantasyRoutes);
+app.use('/api/multi', multiRoutes);
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -74,6 +77,11 @@ db.connect()
         runFantasySyncJobs()
       }, { timezone: APP_TIMEZONE })
       console.log(`[FantasySync] Scheduled: ingestion/pricing/scoring every 30 minutes in ${APP_TIMEZONE}`)
+
+      cron.schedule('*/30 * * * *', () => {
+        runMultiJobs()
+      }, { timezone: APP_TIMEZONE })
+      console.log(`[Multi] Scheduled: bet settlement + weekly top-up every 30 minutes in ${APP_TIMEZONE}`)
     } else {
       console.log(`[Scheduler] Cron jobs disabled in ${NODE_ENV} environment`);
     }

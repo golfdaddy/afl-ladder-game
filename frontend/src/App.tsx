@@ -22,7 +22,8 @@ import FantasyTeamPage from './pages/FantasyTeamPage'
 import FantasyLeaderboardPage from './pages/FantasyLeaderboardPage'
 import FantasyInviteAcceptPage from './pages/FantasyInviteAcceptPage'
 import SettingsPage from './pages/SettingsPage'
-import { FEATURE_FANTASY7_ENABLED } from './config'
+import MultiPage from './pages/MultiPage'
+import { FEATURE_FANTASY7_ENABLED, FEATURE_MULTI_ENABLED } from './config'
 
 const queryClient = new QueryClient()
 
@@ -144,6 +145,16 @@ function App() {
                 }
               />
             </>
+          )}
+          {FEATURE_MULTI_ENABLED && (
+            <Route
+              path="/multi"
+              element={
+                <ProtectedRoute>
+                  <MultiPage />
+                </ProtectedRoute>
+              }
+            />
           )}
           <Route
             path="/settings"

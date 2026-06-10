@@ -39,3 +39,5 @@ export const COMPETITION_LOCKED = LOCK_OVERRIDE === 'true'
 export const SEASON_OVER = _now >= _seasonEnd
 
 export const FEATURE_FANTASY7_ENABLED = import.meta.env.VITE_FEATURE_FANTASY7_ENABLED === 'true'
+
+export const FEATURE_MULTI_ENABLED = import.meta.env.VITE_FEATURE_MULTI_ENABLED === 'true'
