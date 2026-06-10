@@ -328,7 +328,7 @@ export default function CompetitionPage() {
       const response = await api.get(`/admin/afl-ladder/${seasonId}`)
       return response.data
     },
-    enabled: competitionLocked && seasonId > 0,
+    enabled: seasonId > 0,
     retry: false,
   })
 
@@ -1401,9 +1401,6 @@ export default function CompetitionPage() {
 
             {ladderView === 'predictor' && (
               <div>
-                {memberPredictions.length === 0 ? (
-                  <div className="px-6 py-12 text-center text-slate-400 text-sm">No predictions submitted yet.</div>
-                ) : (
                   <>
                     {/* Mode toggle */}
                     <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3 flex-wrap">
@@ -1697,7 +1694,6 @@ export default function CompetitionPage() {
                     </div>
                     )}
                   </>
-                )}
               </div>
             )}
 

@@ -315,24 +315,27 @@ export default function FullSeasonSimulator({
   const finalsState = useMemo(() => {
     const top8 = simRegularSeasonLadder.slice(0, 8).map(t => t.teamName)
 
+    // AFL final eight: QF1 = 1v4, QF2 = 2v3, EF1 = 5v8, EF2 = 6v7
     const qf1w = finalsPicks['QF1'] || null
-    const qf1l = qf1w ? (qf1w === top8[0] ? top8[1] : top8[0]) : null
+    const qf1l = qf1w ? (qf1w === top8[0] ? top8[3] : top8[0]) : null
     const qf2w = finalsPicks['QF2'] || null
-    const qf2l = qf2w ? (qf2w === top8[2] ? top8[3] : top8[2]) : null
+    const qf2l = qf2w ? (qf2w === top8[1] ? top8[2] : top8[1]) : null
     const ef1w = finalsPicks['EF1'] || null
     const ef1l = ef1w ? (ef1w === top8[4] ? top8[7] : top8[4]) : null
     const ef2w = finalsPicks['EF2'] || null
     const ef2l = ef2w ? (ef2w === top8[5] ? top8[6] : top8[5]) : null
 
-    const sf1w = (qf1l && ef2w) ? (finalsPicks['SF1'] || null) : null
-    const sf1l = sf1w ? (sf1w === qf1l ? ef2w : qf1l) : null
-    const sf2w = (qf2l && ef1w) ? (finalsPicks['SF2'] || null) : null
-    const sf2l = sf2w ? (sf2w === qf2l ? ef1w : qf2l) : null
+    // SF1 = QF1 loser v EF1 winner, SF2 = QF2 loser v EF2 winner
+    const sf1w = (qf1l && ef1w) ? (finalsPicks['SF1'] || null) : null
+    const sf1l = sf1w ? (sf1w === qf1l ? ef1w : qf1l) : null
+    const sf2w = (qf2l && ef2w) ? (finalsPicks['SF2'] || null) : null
+    const sf2l = sf2w ? (sf2w === qf2l ? ef2w : qf2l) : null
 
-    const pf1w = (qf1w && sf1w) ? (finalsPicks['PF1'] || null) : null
-    const pf1l = pf1w ? (pf1w === qf1w ? sf1w : qf1w) : null
-    const pf2w = (qf2w && sf2w) ? (finalsPicks['PF2'] || null) : null
-    const pf2l = pf2w ? (pf2w === qf2w ? sf2w : qf2w) : null
+    // PF1 = QF1 winner v SF2 winner, PF2 = QF2 winner v SF1 winner
+    const pf1w = (qf1w && sf2w) ? (finalsPicks['PF1'] || null) : null
+    const pf1l = pf1w ? (pf1w === qf1w ? sf2w : qf1w) : null
+    const pf2w = (qf2w && sf1w) ? (finalsPicks['PF2'] || null) : null
+    const pf2l = pf2w ? (pf2w === qf2w ? sf1w : qf2w) : null
 
     const gfw = (pf1w && pf2w) ? (finalsPicks['GF'] || null) : null
     const gfl = gfw ? (gfw === pf1w ? pf2w : pf1w) : null
@@ -567,18 +570,18 @@ export default function FullSeasonSimulator({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <FinalsMatchCard
                   matchId="QF1"
-                  label={`QF1 — Seed 1 vs Seed 2`}
+                  label={`QF1 — Seed 1 vs Seed 4`}
                   teamA={top8[0] || null}
-                  teamB={top8[1] || null}
+                  teamB={top8[3] || null}
                   picked={finalsPicks['QF1'] || null}
                   onPick={handleFinalsPick}
-                  disabled={top8.length < 2}
+                  disabled={top8.length < 4}
                 />
                 <FinalsMatchCard
                   matchId="QF2"
-                  label={`QF2 — Seed 3 vs Seed 4`}
-                  teamA={top8[2] || null}
-                  teamB={top8[3] || null}
+                  label={`QF2 — Seed 2 vs Seed 3`}
+                  teamA={top8[1] || null}
+                  teamB={top8[2] || null}
                   picked={finalsPicks['QF2'] || null}
                   onPick={handleFinalsPick}
                   disabled={top8.length < 4}
@@ -610,21 +613,21 @@ export default function FullSeasonSimulator({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <FinalsMatchCard
                   matchId="SF1"
-                  label={`SF1 — QF1 loser vs EF2 winner`}
+                  label={`SF1 — QF1 loser vs EF1 winner`}
                   teamA={qf1l}
-                  teamB={ef2w}
+                  teamB={ef1w}
                   picked={sf1w}
                   onPick={handleFinalsPick}
-                  disabled={!qf1l || !ef2w}
+                  disabled={!qf1l || !ef1w}
                 />
                 <FinalsMatchCard
                   matchId="SF2"
-                  label={`SF2 — QF2 loser vs EF1 winner`}
+                  label={`SF2 — QF2 loser vs EF2 winner`}
                   teamA={qf2l}
-                  teamB={ef1w}
+                  teamB={ef2w}
                   picked={sf2w}
                   onPick={handleFinalsPick}
-                  disabled={!qf2l || !ef1w}
+                  disabled={!qf2l || !ef2w}
                 />
               </div>
             </div>
@@ -635,21 +638,21 @@ export default function FullSeasonSimulator({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <FinalsMatchCard
                   matchId="PF1"
-                  label={`PF1 — QF1 winner vs SF1 winner`}
+                  label={`PF1 — QF1 winner vs SF2 winner`}
                   teamA={qf1w}
-                  teamB={sf1w}
+                  teamB={sf2w}
                   picked={pf1w}
                   onPick={handleFinalsPick}
-                  disabled={!qf1w || !sf1w}
+                  disabled={!qf1w || !sf2w}
                 />
                 <FinalsMatchCard
                   matchId="PF2"
-                  label={`PF2 — QF2 winner vs SF2 winner`}
+                  label={`PF2 — QF2 winner vs SF1 winner`}
                   teamA={qf2w}
-                  teamB={sf2w}
+                  teamB={sf1w}
                   picked={pf2w}
                   onPick={handleFinalsPick}
-                  disabled={!qf2w || !sf2w}
+                  disabled={!qf2w || !sf1w}
                 />
               </div>
             </div>
