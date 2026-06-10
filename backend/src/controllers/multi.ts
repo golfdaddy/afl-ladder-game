@@ -1,6 +1,7 @@
 import { Response } from 'express'
 import { AuthRequest } from '../middleware/auth'
 import { MultiModel } from '../models/multi'
+import { MultiPropsModel } from '../models/multiProps'
 import { SeasonModel } from '../models/season'
 
 async function requireSeason(res: Response) {
@@ -28,6 +29,15 @@ export class MultiController {
     if (!season) return
     const rounds = await MultiModel.getMarkets(season.year)
     res.json({ rounds })
+  }
+
+  static async getGameProps(req: AuthRequest, res: Response) {
+    const season = await requireSeason(res)
+    if (!season) return
+    const gameId = parseInt(req.params.gameId)
+    if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'Invalid game id' })
+    const props = await MultiPropsModel.getGamePropsById(season.year, gameId)
+    res.json({ props })
   }
 
   static async placeBet(req: AuthRequest, res: Response) {

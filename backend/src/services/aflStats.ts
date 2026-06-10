@@ -1,0 +1,172 @@
+import https from 'https'
+
+// Official AFL APIs:
+// - aflapi.afl.com.au — public fixture/match data, no auth
+// - api.afl.com.au/cfs — player stats, needs a free token from the WMCTok handshake
+
+const AFL_TO_INTERNAL: Record<string, string> = {
+  'Adelaide Crows':    'Adelaide Crows',
+  'Brisbane Lions':    'Brisbane Lions',
+  'Carlton':           'Carlton',
+  'Collingwood':       'Collingwood',
+  'Essendon':          'Essendon',
+  'Fremantle':         'Fremantle',
+  'Geelong Cats':      'Geelong',
+  'Gold Coast SUNS':   'Gold Coast Suns',
+  'Gold Coast Suns':   'Gold Coast Suns',
+  'GWS GIANTS':        'GWS Giants',
+  'GWS Giants':        'GWS Giants',
+  'Hawthorn':          'Hawthorn',
+  'Melbourne':         'Melbourne',
+  'North Melbourne':   'North Melbourne',
+  'Port Adelaide':     'Port Adelaide',
+  'Richmond':          'Richmond',
+  'St Kilda':          'St Kilda',
+  'Sydney Swans':      'Sydney Swans',
+  'West Coast Eagles': 'West Coast Eagles',
+  'Western Bulldogs':  'Western Bulldogs',
+}
+
+export interface AflMatch {
+  providerId: string
+  round: number
+  status: string // SCHEDULED | CONCLUDED | LIVE etc.
+  homeTeam: string // internal name
+  awayTeam: string // internal name
+  utcStartTime: string
+}
+
+export interface AflPlayerGameStats {
+  playerId: string
+  playerName: string
+  teamInternal: string
+  disposals: number
+  goals: number
+}
+
+function request<T>(options: { hostname: string; path: string; method?: string; headers?: Record<string, string> }): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: options.hostname,
+        path: options.path,
+        method: options.method || 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (AFLLadderPredictor)',
+          'Accept': 'application/json',
+          'Accept-Encoding': 'identity',
+          ...(options.method === 'POST' ? { 'Content-Length': '0' } : {}),
+          ...options.headers,
+        },
+      },
+      (res) => {
+        let raw = ''
+        res.on('data', (chunk) => (raw += chunk))
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(raw) as T)
+          } catch {
+            reject(new Error(`AFL API non-JSON response (status ${res.statusCode}) for ${options.path}`))
+          }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.setTimeout(15000, () => {
+      req.destroy()
+      reject(new Error('AFL API request timed out'))
+    })
+    req.end()
+  })
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+export class AflStatsService {
+  private static token: { value: string; fetchedAt: number } | null = null
+  private static compSeasonCache: Map<number, number> = new Map() // year -> compSeasonId
+  private static matchesCache: { year: number; fetchedAt: number; matches: AflMatch[] } | null = null
+
+  private static async getToken(): Promise<string> {
+    const now = Date.now()
+    if (this.token && now - this.token.fetchedAt < 30 * 60 * 1000) return this.token.value
+    const data = await request<{ token: string }>({ hostname: 'api.afl.com.au', path: '/cfs/afl/WMCTok', method: 'POST' })
+    if (!data.token) throw new Error('AFL API token handshake failed')
+    this.token = { value: data.token, fetchedAt: now }
+    return data.token
+  }
+
+  /** Resolve the AFL Premiership compSeason id for a year (e.g. 2026 -> 85). */
+  static async getCompSeasonId(year: number): Promise<number> {
+    const cached = this.compSeasonCache.get(year)
+    if (cached) return cached
+    const data = await request<{ compSeasons: Array<{ id: number; name: string }> }>({
+      hostname: 'aflapi.afl.com.au',
+      path: '/afl/v2/compseasons?competitionId=1&pageSize=100',
+    })
+    const season = (data.compSeasons || []).find(s => (s.name || '').includes(`${year}`) && (s.name || '').includes('Premiership'))
+    if (!season) throw new Error(`No AFL Premiership compSeason found for ${year}`)
+    this.compSeasonCache.set(year, season.id)
+    return season.id
+  }
+
+  /** All matches for the season (10-minute cache). */
+  static async fetchMatches(year: number): Promise<AflMatch[]> {
+    const now = Date.now()
+    if (this.matchesCache && this.matchesCache.year === year && now - this.matchesCache.fetchedAt < 10 * 60 * 1000) {
+      return this.matchesCache.matches
+    }
+    const compSeasonId = await this.getCompSeasonId(year)
+    const data = await request<{ matches: Array<any> }>({
+      hostname: 'aflapi.afl.com.au',
+      path: `/afl/v2/matches?competitionId=1&compSeasonId=${compSeasonId}&pageSize=300`,
+    })
+    const matches: AflMatch[] = (data.matches || [])
+      .filter(m => m.home?.team?.name && m.away?.team?.name)
+      .map(m => ({
+        providerId: m.providerId,
+        round: m.round?.roundNumber ?? m.roundNumber ?? 0,
+        status: m.status,
+        homeTeam: AFL_TO_INTERNAL[m.home.team.name] || m.home.team.name,
+        awayTeam: AFL_TO_INTERNAL[m.away.team.name] || m.away.team.name,
+        utcStartTime: m.utcStartTime,
+      }))
+    this.matchesCache = { year, fetchedAt: now, matches }
+    return matches
+  }
+
+  /** Player stat lines for one completed match. */
+  static async fetchMatchPlayerStats(providerId: string, homeTeam: string, awayTeam: string): Promise<AflPlayerGameStats[]> {
+    const token = await this.getToken()
+    const data = await request<{
+      homeTeamPlayerStats?: Array<any>
+      awayTeamPlayerStats?: Array<any>
+    }>({
+      hostname: 'api.afl.com.au',
+      path: `/cfs/afl/playerStats/match/${providerId}`,
+      headers: { 'x-media-mis-token': token },
+    })
+
+    const mapSide = (rows: Array<any> | undefined, teamInternal: string): AflPlayerGameStats[] =>
+      (rows || []).map(row => {
+        // The player identity sits at varying nesting depths across API versions
+        const candidates = [row.player?.player?.player, row.player?.player, row.player]
+        const p = candidates.find(c => c && c.playerId)
+        const stats = row.playerStats?.stats || row.stats || {}
+        return {
+          playerId: p?.playerId || '',
+          playerName: p ? `${p.playerName?.givenName || ''} ${p.playerName?.surname || ''}`.trim() : '',
+          teamInternal,
+          disposals: Number(stats.disposals ?? 0),
+          goals: Number(stats.goals ?? 0),
+        }
+      }).filter(p => p.playerId)
+
+    return [...mapSide(data.homeTeamPlayerStats, homeTeam), ...mapSide(data.awayTeamPlayerStats, awayTeam)]
+  }
+
+  /** Polite delay helper for backfills. */
+  static pause(ms = 300) {
+    return sleep(ms)
+  }
+}

@@ -25,12 +25,34 @@ interface MarketRound {
   games: MarketGame[]
 }
 
+type LegMarket = 'h2h' | 'disposals_ou' | 'anytime_goal'
+
 interface SlipLeg {
+  key: string
   gameId: number
-  selection: string
-  opponent: string
+  market: LegMarket
+  label: string // main display line
+  sublabel: string // matchup / context
   odds: number
-  label: string
+  chipTeam: string // team whose colours to show
+  selection?: string // h2h team
+  playerId?: string
+  side?: 'over' | 'under'
+}
+
+interface PropPlayer {
+  playerId: string
+  playerName: string
+  team: string
+  disposals: { line: number; overOdds: number; underOdds: number; avg: number } | null
+  anytimeGoal: { odds: number; avg: number } | null
+}
+
+interface GamePropsData {
+  gameId: number
+  homeTeam: string
+  awayTeam: string
+  players: PropPlayer[]
 }
 
 interface BetLeg {
@@ -104,6 +126,8 @@ export default function MultiPage() {
   const [stakeInput, setStakeInput] = useState('10')
   const [placeError, setPlaceError] = useState('')
   const [placeSuccess, setPlaceSuccess] = useState('')
+  const [propsGameId, setPropsGameId] = useState<number | null>(null)
+  const [propsSearch, setPropsSearch] = useState('')
 
   const { data: accountData } = useQuery({
     queryKey: ['multi', 'account'],
@@ -128,6 +152,14 @@ export default function MultiPage() {
     enabled: view === 'leaderboard',
   })
 
+  const { data: propsData, isLoading: propsLoading } = useQuery({
+    queryKey: ['multi', 'props', propsGameId],
+    queryFn: () => api.get(`/multi/markets/${propsGameId}/props`).then(r => r.data),
+    enabled: propsGameId != null,
+    staleTime: 5 * 60 * 1000,
+  })
+  const gameProps: GamePropsData | null = propsData?.props ?? null
+
   const balance: number = accountData?.account?.balance ?? 0
   const rounds: MarketRound[] = marketsData?.rounds ?? []
   const bets: Bet[] = betsData?.bets ?? []
@@ -140,26 +172,91 @@ export default function MultiPage() {
 
   // ── Bet slip ───────────────────────────────────────────────────────────────
 
-  const slipOdds = useMemo(() => Math.round(slip.reduce((acc, l) => acc * l.odds, 1) * 1000) / 1000, [slip])
+  // Combined odds with the same SGM haircut the server applies (0.9 per extra same-game leg)
+  const slipOdds = useMemo(() => {
+    const raw = slip.reduce((acc, l) => acc * l.odds, 1)
+    const perGame = new Map<number, number>()
+    for (const l of slip) perGame.set(l.gameId, (perGame.get(l.gameId) || 0) + 1)
+    let factor = 1
+    for (const count of perGame.values()) if (count > 1) factor *= Math.pow(0.9, count - 1)
+    return Math.round(raw * factor * 1000) / 1000
+  }, [slip])
+  const hasSgm = useMemo(() => {
+    const perGame = new Map<number, number>()
+    for (const l of slip) perGame.set(l.gameId, (perGame.get(l.gameId) || 0) + 1)
+    return [...perGame.values()].some(c => c > 1)
+  }, [slip])
   const stake = parseFloat(stakeInput) || 0
   const estPayout = Math.round(stake * slipOdds * 100) / 100
 
+  const clearMessages = () => { setPlaceError(''); setPlaceSuccess('') }
+
+  const toggleLeg = (leg: SlipLeg, replaceKeys: string[] = []) => {
+    clearMessages()
+    setSlip(prev => {
+      if (prev.some(l => l.key === leg.key)) return prev.filter(l => l.key !== leg.key)
+      const without = prev.filter(l => !replaceKeys.includes(l.key))
+      if (without.length >= 10) return without // server cap — silently ignore extras
+      return [...without, leg]
+    })
+  }
+
   const toggleSelection = (game: MarketGame, selection: 'home' | 'away') => {
-    setPlaceError('')
-    setPlaceSuccess('')
     const teamName = selection === 'home' ? game.homeTeam : game.awayTeam
     const opponent = selection === 'home' ? game.awayTeam : game.homeTeam
     const odds = selection === 'home' ? game.homeOdds : game.awayOdds
-    setSlip(prev => {
-      const existing = prev.find(l => l.gameId === game.gameId)
-      if (existing?.selection === teamName) return prev.filter(l => l.gameId !== game.gameId)
-      const without = prev.filter(l => l.gameId !== game.gameId)
-      return [...without, { gameId: game.gameId, selection: teamName, opponent, odds, label: `R${game.round}` }]
+    toggleLeg(
+      {
+        key: `h2h:${game.gameId}:${teamName}`,
+        gameId: game.gameId,
+        market: 'h2h',
+        label: teamName,
+        sublabel: `vs ${opponent} · R${game.round}`,
+        odds,
+        chipTeam: teamName,
+        selection: teamName,
+      },
+      [`h2h:${game.gameId}:${game.homeTeam}`, `h2h:${game.gameId}:${game.awayTeam}`]
+    )
+  }
+
+  const toggleDisposals = (game: GamePropsData, player: PropPlayer, side: 'over' | 'under') => {
+    if (!player.disposals) return
+    toggleLeg(
+      {
+        key: `disposals_ou:${game.gameId}:${player.playerId}:${side}`,
+        gameId: game.gameId,
+        market: 'disposals_ou',
+        label: `${player.playerName} ${side === 'over' ? 'O' : 'U'} ${player.disposals.line} disposals`,
+        sublabel: `${game.homeTeam} v ${game.awayTeam}`,
+        odds: side === 'over' ? player.disposals.overOdds : player.disposals.underOdds,
+        chipTeam: player.team,
+        playerId: player.playerId,
+        side,
+      },
+      [`disposals_ou:${game.gameId}:${player.playerId}:over`, `disposals_ou:${game.gameId}:${player.playerId}:under`]
+    )
+  }
+
+  const toggleAnytimeGoal = (game: GamePropsData, player: PropPlayer) => {
+    if (!player.anytimeGoal) return
+    toggleLeg({
+      key: `anytime_goal:${game.gameId}:${player.playerId}`,
+      gameId: game.gameId,
+      market: 'anytime_goal',
+      label: `${player.playerName} anytime goal`,
+      sublabel: `${game.homeTeam} v ${game.awayTeam}`,
+      odds: player.anytimeGoal.odds,
+      chipTeam: player.team,
+      playerId: player.playerId,
     })
   }
 
   const placeBetMutation = useMutation({
-    mutationFn: () => api.post('/multi/bets', { stake, legs: slip.map(l => ({ gameId: l.gameId, selection: l.selection })) }),
+    mutationFn: () => api.post('/multi/bets', {
+      stake,
+      legs: slip.map(l => ({ gameId: l.gameId, market: l.market, selection: l.selection, playerId: l.playerId, side: l.side })),
+    }),
     onSuccess: (response) => {
       setSlip([])
       setPlaceError('')
@@ -252,7 +349,9 @@ export default function MultiPage() {
 
                   <div className="space-y-2">
                     {visibleRound?.games.map(game => {
-                      const picked = slip.find(l => l.gameId === game.gameId)
+                      const pickedH2h = slip.find(l => l.market === 'h2h' && l.gameId === game.gameId)
+                      const propLegsForGame = slip.filter(l => l.market !== 'h2h' && l.gameId === game.gameId).length
+                      const isExpanded = propsGameId === game.gameId
                       return (
                         <div key={game.gameId} className={`bg-white rounded-2xl border overflow-hidden ${game.locked ? 'border-slate-100 opacity-60' : 'border-slate-200'}`}>
                           <div className="px-4 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
@@ -264,7 +363,7 @@ export default function MultiPage() {
                           </div>
                           <div className="flex">
                             {([['home', game.homeTeam, game.homeOdds], ['away', game.awayTeam, game.awayOdds]] as const).map(([side, team, odds]) => {
-                              const isPicked = picked?.selection === team
+                              const isPicked = pickedH2h?.selection === team
                               return (
                                 <button
                                   key={side}
@@ -283,6 +382,92 @@ export default function MultiPage() {
                               )
                             })}
                           </div>
+
+                          {/* Player props toggle */}
+                          {!game.locked && (
+                            <button
+                              onClick={() => { setPropsGameId(isExpanded ? null : game.gameId); setPropsSearch('') }}
+                              className="w-full px-4 py-2 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold text-slate-500 hover:bg-slate-50 transition-colors"
+                            >
+                              <span>
+                                Player props — disposals &amp; goals
+                                {propLegsForGame > 0 && <span className="ml-2 px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">{propLegsForGame} in slip</span>}
+                              </span>
+                              <span className="text-slate-400">{isExpanded ? '▲' : '▼'}</span>
+                            </button>
+                          )}
+
+                          {/* Props panel */}
+                          {isExpanded && (
+                            <div className="border-t border-slate-100 bg-slate-50/60">
+                              {propsLoading ? (
+                                <div className="px-4 py-6 text-center text-slate-400 text-xs">Loading player markets…</div>
+                              ) : !gameProps || gameProps.players.length === 0 ? (
+                                <div className="px-4 py-6 text-center text-slate-400 text-xs">No player markets for this game yet.</div>
+                              ) : (
+                                <>
+                                  <div className="px-4 pt-3 pb-1 flex items-center gap-2">
+                                    <input
+                                      type="text"
+                                      placeholder="Search player…"
+                                      value={propsSearch}
+                                      onChange={e => setPropsSearch(e.target.value)}
+                                      className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
+                                    />
+                                    <span className="text-[10px] text-slate-400">O/U = disposals · AGS = anytime goal</span>
+                                  </div>
+                                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                                    {gameProps.players
+                                      .filter(p => !propsSearch || p.playerName.toLowerCase().includes(propsSearch.toLowerCase()))
+                                      .map(player => {
+                                        const overKey = `disposals_ou:${game.gameId}:${player.playerId}:over`
+                                        const underKey = `disposals_ou:${game.gameId}:${player.playerId}:under`
+                                        const agsKey = `anytime_goal:${game.gameId}:${player.playerId}`
+                                        const inSlip = (k: string) => slip.some(l => l.key === k)
+                                        return (
+                                          <div key={player.playerId} className="px-4 py-2 flex items-center gap-2 bg-white">
+                                            <TeamChip teamName={player.team} />
+                                            <div className="flex-1 min-w-0">
+                                              <p className="text-xs font-semibold text-slate-800 truncate">{player.playerName}</p>
+                                              <p className="text-[10px] text-slate-400">
+                                                {player.disposals ? `${player.disposals.avg} disp avg` : ''}
+                                                {player.disposals && player.anytimeGoal ? ' · ' : ''}
+                                                {player.anytimeGoal ? `${player.anytimeGoal.avg} gls avg` : ''}
+                                              </p>
+                                            </div>
+                                            {player.disposals && (
+                                              <div className="flex items-center gap-1 flex-shrink-0">
+                                                <span className="text-[10px] font-bold text-slate-400 w-8 text-right">{player.disposals.line}</span>
+                                                <button
+                                                  onClick={() => toggleDisposals(gameProps, player, 'over')}
+                                                  className={`px-2 py-1 rounded-lg text-[11px] font-black transition-colors ${inSlip(overKey) ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                                >
+                                                  O {player.disposals.overOdds.toFixed(2)}
+                                                </button>
+                                                <button
+                                                  onClick={() => toggleDisposals(gameProps, player, 'under')}
+                                                  className={`px-2 py-1 rounded-lg text-[11px] font-black transition-colors ${inSlip(underKey) ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                                >
+                                                  U {player.disposals.underOdds.toFixed(2)}
+                                                </button>
+                                              </div>
+                                            )}
+                                            {player.anytimeGoal && (
+                                              <button
+                                                onClick={() => toggleAnytimeGoal(gameProps, player)}
+                                                className={`px-2 py-1 rounded-lg text-[11px] font-black flex-shrink-0 transition-colors ${inSlip(agsKey) ? 'bg-violet-600 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
+                                              >
+                                                AGS {player.anytimeGoal.odds.toFixed(2)}
+                                              </button>
+                                            )}
+                                          </div>
+                                        )
+                                      })}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )
                     })}
@@ -301,19 +486,19 @@ export default function MultiPage() {
 
                 {slip.length === 0 ? (
                   <div className="px-4 py-10 text-center text-slate-400 text-xs">
-                    Tap odds to add legs.<br />2+ legs makes it a multi.
+                    Tap odds to add legs.<br />Mix match results with player props.
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-100">
                     {slip.map(leg => (
-                      <div key={leg.gameId} className="px-4 py-2.5 flex items-center gap-2">
-                        <TeamChip teamName={leg.selection} />
+                      <div key={leg.key} className="px-4 py-2.5 flex items-center gap-2">
+                        <TeamChip teamName={leg.chipTeam} />
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-slate-800 truncate">{leg.selection}</p>
-                          <p className="text-[10px] text-slate-400 truncate">vs {leg.opponent} · {leg.label}</p>
+                          <p className="text-xs font-semibold text-slate-800 truncate">{leg.label}</p>
+                          <p className="text-[10px] text-slate-400 truncate">{leg.sublabel}</p>
                         </div>
                         <span className="text-xs font-black text-slate-700">{leg.odds.toFixed(2)}</span>
-                        <button onClick={() => setSlip(prev => prev.filter(l => l.gameId !== leg.gameId))} className="text-slate-300 hover:text-red-400 text-sm font-bold px-1">×</button>
+                        <button onClick={() => { clearMessages(); setSlip(prev => prev.filter(l => l.key !== leg.key)) }} className="text-slate-300 hover:text-red-400 text-sm font-bold px-1">×</button>
                       </div>
                     ))}
                   </div>
@@ -324,6 +509,9 @@ export default function MultiPage() {
                     <span className="text-slate-500 font-semibold">Combined odds</span>
                     <span className="font-black text-slate-900">{slip.length > 0 ? slipOdds.toFixed(2) : '—'}</span>
                   </div>
+                  {hasSgm && (
+                    <p className="text-[10px] text-slate-400">Same-game legs are related, so combined odds take a haircut — just like the real SGM.</p>
+                  )}
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-500 font-semibold flex-shrink-0">Stake $</span>
                     <input

@@ -1,4 +1,5 @@
 import { MultiModel } from '../models/multi'
+import { MultiPropsModel } from '../models/multiProps'
 import { SeasonModel } from '../models/season'
 import { isMultiEnabled } from '../middleware/multiFeature'
 
@@ -25,6 +26,12 @@ export async function runMultiJobs(): Promise<void> {
   try {
     const season = await SeasonModel.getCurrentSeason()
     if (!season) return
+
+    // Ingest new player stats before settling so prop legs can resolve
+    const ingested = await MultiPropsModel.ingestPlayerStats(season.year)
+    if (ingested > 0) {
+      console.log(`[Multi] Ingested player stats for ${ingested} matches`)
+    }
 
     const settled = await MultiModel.settleBets(season.id, season.year)
     if (settled.legsSettled > 0 || settled.betsSettled > 0) {

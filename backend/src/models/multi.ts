@@ -2,10 +2,23 @@ import { PoolClient } from 'pg'
 import { db } from '../db'
 import { SquiggleService } from '../services/squiggle'
 import { gameOdds } from '../utils/multiOdds'
+import { MultiPropsModel, GameProps } from './multiProps'
 
 const START_BALANCE = Number(process.env.MULTI_START_BALANCE || 1000)
 const WEEKLY_TOPUP = Number(process.env.MULTI_WEEKLY_TOPUP || 100)
 const MAX_LEGS = 10
+// Same-game multi haircut: each extra leg sharing a game discounts combined odds
+const SGM_DISCOUNT = 0.9
+
+export type LegMarket = 'h2h' | 'disposals_ou' | 'anytime_goal'
+
+export interface BetLegInput {
+  gameId: number
+  market?: LegMarket
+  selection?: string // h2h: team name
+  playerId?: string // props
+  side?: 'over' | 'under' // disposals_ou
+}
 
 export interface MultiAccount {
   id: number
@@ -24,6 +37,9 @@ export interface MultiBetLeg {
   opponent: string
   odds: number
   status: string
+  playerName?: string | null
+  statLine?: number | null
+  side?: string | null
 }
 
 export interface MultiBet {
@@ -134,22 +150,23 @@ export class MultiModel {
 
   /**
    * Place a multi bet. Odds are computed server-side from current Squiggle
-   * probabilities — the client only sends game ids and selections.
+   * probabilities and stored player form — the client only sends game ids,
+   * selections and market types. Legs sharing a game take an SGM discount.
    */
   static async placeBet(
     userId: number,
     seasonId: number,
     year: number,
     stake: number,
-    legs: Array<{ gameId: number; selection: string }>
+    legs: BetLegInput[]
   ): Promise<{ betId: number; totalOdds: number; potentialPayout: number; balance: number }> {
     if (!Number.isFinite(stake) || stake <= 0) throw Object.assign(new Error('Stake must be greater than zero'), { status: 400 })
     if (!Array.isArray(legs) || legs.length === 0) throw Object.assign(new Error('A bet needs at least one leg'), { status: 400 })
     if (legs.length > MAX_LEGS) throw Object.assign(new Error(`Maximum ${MAX_LEGS} legs per multi`), { status: 400 })
 
-    const gameIds = legs.map(l => l.gameId)
-    if (new Set(gameIds).size !== gameIds.length) {
-      throw Object.assign(new Error('You can only include each game once per multi'), { status: 400 })
+    const legKeys = legs.map(l => `${l.gameId}:${l.market || 'h2h'}:${l.playerId || l.selection}:${l.side || ''}`)
+    if (new Set(legKeys).size !== legKeys.length) {
+      throw Object.assign(new Error('Duplicate legs in this multi'), { status: 400 })
     }
 
     // Validate legs against live upcoming games and lock odds server-side
@@ -160,31 +177,109 @@ export class MultiModel {
     const gameById = new Map<number, (typeof rounds)[number]['games'][number]>()
     for (const r of rounds) for (const g of r.games) gameById.set(g.id, g)
 
+    // Prop markets are generated once per distinct game in the slip
+    const propsByGame = new Map<number, GameProps | null>()
+    for (const leg of legs) {
+      const market = leg.market || 'h2h'
+      if (market !== 'h2h' && !propsByGame.has(leg.gameId)) {
+        const game = gameById.get(leg.gameId)
+        propsByGame.set(
+          leg.gameId,
+          game ? await MultiPropsModel.getGameProps(year, { id: game.id, round: game.round, hteamName: game.hteamName, ateamName: game.ateamName }) : null
+        )
+      }
+    }
+
     const now = Date.now()
     const resolvedLegs = legs.map(l => {
+      const market: LegMarket = l.market || 'h2h'
       const game = gameById.get(l.gameId)
       if (!game) throw Object.assign(new Error(`Game ${l.gameId} is not open for betting`), { status: 400 })
       if (game.date && new Date(game.date).getTime() <= now) {
         throw Object.assign(new Error(`${game.hteamName} v ${game.ateamName} has already started`), { status: 400 })
       }
-      const isHome = l.selection === game.hteamName
-      const isAway = l.selection === game.ateamName
-      if (!isHome && !isAway) {
-        throw Object.assign(new Error(`${l.selection} is not playing in game ${l.gameId}`), { status: 400 })
+
+      if (market === 'h2h') {
+        const isHome = l.selection === game.hteamName
+        const isAway = l.selection === game.ateamName
+        if (!isHome && !isAway) {
+          throw Object.assign(new Error(`${l.selection} is not playing in game ${l.gameId}`), { status: 400 })
+        }
+        const odds = gameOdds(probs.get(game.id) ?? game.hprob)
+        return {
+          gameId: game.id,
+          gameRound: game.round,
+          gameDate: game.date,
+          market,
+          selection: l.selection as string,
+          opponent: isHome ? game.ateamName : game.hteamName,
+          odds: isHome ? odds.home : odds.away,
+          playerId: null as string | null,
+          playerName: null as string | null,
+          statLine: null as number | null,
+          side: null as string | null,
+          providerMatchId: null as string | null,
+        }
       }
-      const odds = gameOdds(probs.get(game.id) ?? game.hprob)
-      return {
-        gameId: game.id,
-        gameRound: game.round,
-        gameDate: game.date,
-        selection: l.selection,
-        opponent: isHome ? game.ateamName : game.hteamName,
-        odds: isHome ? odds.home : odds.away,
+
+      // Player prop leg
+      const props = propsByGame.get(l.gameId)
+      const player = props?.players.find(p => p.playerId === l.playerId)
+      if (!props || !player) {
+        throw Object.assign(new Error(`Player market unavailable for game ${l.gameId}`), { status: 400 })
       }
+
+      if (market === 'disposals_ou') {
+        if (!player.disposals) throw Object.assign(new Error(`No disposal line for ${player.playerName}`), { status: 400 })
+        if (l.side !== 'over' && l.side !== 'under') throw Object.assign(new Error('Disposal legs need a side (over/under)'), { status: 400 })
+        return {
+          gameId: game.id,
+          gameRound: game.round,
+          gameDate: game.date,
+          market,
+          selection: `${player.playerName} ${l.side === 'over' ? 'Over' : 'Under'} ${player.disposals.line} Disposals`,
+          opponent: `${game.hteamName} v ${game.ateamName}`,
+          odds: l.side === 'over' ? player.disposals.overOdds : player.disposals.underOdds,
+          playerId: player.playerId,
+          playerName: player.playerName,
+          statLine: player.disposals.line,
+          side: l.side,
+          providerMatchId: props.providerMatchId,
+        }
+      }
+
+      if (market === 'anytime_goal') {
+        if (!player.anytimeGoal) throw Object.assign(new Error(`No goal market for ${player.playerName}`), { status: 400 })
+        return {
+          gameId: game.id,
+          gameRound: game.round,
+          gameDate: game.date,
+          market,
+          selection: `${player.playerName} Anytime Goal Scorer`,
+          opponent: `${game.hteamName} v ${game.ateamName}`,
+          odds: player.anytimeGoal.odds,
+          playerId: player.playerId,
+          playerName: player.playerName,
+          statLine: null,
+          side: null,
+          providerMatchId: props.providerMatchId,
+        }
+      }
+
+      throw Object.assign(new Error(`Unknown market type: ${market}`), { status: 400 })
     })
 
     const roundedStake = Math.round(stake * 100) / 100
-    const totalOdds = Math.round(resolvedLegs.reduce((acc, l) => acc * l.odds, 1) * 1000) / 1000
+
+    // Combined odds with same-game correlation haircut
+    const rawOdds = resolvedLegs.reduce((acc, l) => acc * l.odds, 1)
+    const legsPerGame = new Map<number, number>()
+    for (const l of resolvedLegs) legsPerGame.set(l.gameId, (legsPerGame.get(l.gameId) || 0) + 1)
+    let sgmFactor = 1
+    for (const count of legsPerGame.values()) {
+      if (count > 1) sgmFactor *= Math.pow(SGM_DISCOUNT, count - 1)
+    }
+    const totalOdds = Math.max(1.01, Math.round(rawOdds * sgmFactor * 1000) / 1000)
     const potentialPayout = Math.round(roundedStake * totalOdds * 100) / 100
 
     const account = await this.getOrCreateAccount(userId, seasonId)
@@ -209,9 +304,9 @@ export class MultiModel {
 
       for (const leg of resolvedLegs) {
         await client.query(
-          `INSERT INTO multi_bet_legs (bet_id, game_id, game_round, game_date, market, selection, opponent, odds)
-           VALUES ($1, $2, $3, $4, 'h2h', $5, $6, $7)`,
-          [betId, leg.gameId, leg.gameRound, leg.gameDate, leg.selection, leg.opponent, leg.odds]
+          `INSERT INTO multi_bet_legs (bet_id, game_id, game_round, game_date, market, selection, opponent, odds, player_id, player_name, stat_line, side, provider_match_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          [betId, leg.gameId, leg.gameRound, leg.gameDate, leg.market, leg.selection, leg.opponent, leg.odds, leg.playerId, leg.playerName, leg.statLine, leg.side, leg.providerMatchId]
         )
       }
 
@@ -239,7 +334,8 @@ export class MultiModel {
     const betIds = result.rows.map((r: any) => r.id)
     const legsResult = await db.query(
       `SELECT id, bet_id as "betId", game_id as "gameId", game_round as "gameRound", game_date as "gameDate",
-              market, selection, opponent, odds, status
+              market, selection, opponent, odds, status,
+              player_name as "playerName", stat_line as "statLine", side
        FROM multi_bet_legs WHERE bet_id = ANY($1::int[])
        ORDER BY game_date ASC NULLS LAST, id ASC`,
       [betIds]
@@ -247,7 +343,7 @@ export class MultiModel {
     const legsByBet = new Map<number, MultiBetLeg[]>()
     for (const leg of legsResult.rows) {
       const list = legsByBet.get(leg.betId) || []
-      list.push({ ...leg, odds: num(leg.odds) })
+      list.push({ ...leg, odds: num(leg.odds), statLine: leg.statLine == null ? null : num(leg.statLine) })
       legsByBet.set(leg.betId, list)
     }
 
@@ -279,10 +375,12 @@ export class MultiModel {
     return result.rows.map((r: any) => ({ ...r, balance: num(r.balance), pendingStake: num(r.pendingStake) }))
   }
 
-  /** Settle pending legs against completed Squiggle games, then settle and pay finished bets. */
+  /** Settle pending legs against completed games and ingested player stats, then settle and pay finished bets. */
   static async settleBets(seasonId: number, year: number): Promise<{ legsSettled: number; betsSettled: number }> {
     const pendingLegs = await db.query(
-      `SELECT l.id, l.bet_id as "betId", l.game_id as "gameId", l.selection
+      `SELECT l.id, l.bet_id as "betId", l.game_id as "gameId", l.selection, l.market,
+              l.player_id as "playerId", l.stat_line as "statLine", l.side,
+              l.provider_match_id as "providerMatchId"
        FROM multi_bet_legs l
        JOIN multi_bets b ON l.bet_id = b.id
        JOIN multi_accounts a ON b.account_id = a.id
@@ -295,13 +393,51 @@ export class MultiModel {
     const winnerByGame = new Map<number, string | null>()
     for (const g of completed) winnerByGame.set(g.id, g.winnerName)
 
+    // Player stats for any prop legs (only matches already ingested can settle)
+    const providerIds = [...new Set(pendingLegs.rows.filter((l: any) => l.providerMatchId).map((l: any) => l.providerMatchId))]
+    const statsByMatch = new Map<string, Map<string, { disposals: number; goals: number }>>()
+    if (providerIds.length > 0) {
+      const statsResult = await db.query(
+        `SELECT provider_match_id as "providerMatchId", player_id as "playerId", disposals, goals
+         FROM multi_player_stats WHERE provider_match_id = ANY($1::varchar[])`,
+        [providerIds]
+      )
+      for (const row of statsResult.rows) {
+        const match = statsByMatch.get(row.providerMatchId) || new Map()
+        match.set(row.playerId, { disposals: row.disposals, goals: row.goals })
+        statsByMatch.set(row.providerMatchId, match)
+      }
+    }
+
     let legsSettled = 0
     const touchedBets = new Set<number>()
 
     for (const leg of pendingLegs.rows) {
-      if (!winnerByGame.has(leg.gameId)) continue
-      const winner = winnerByGame.get(leg.gameId)
-      const status = winner === null ? 'void' : winner === leg.selection ? 'won' : 'lost'
+      let status: string | null = null
+
+      if (leg.market === 'h2h') {
+        if (!winnerByGame.has(leg.gameId)) continue
+        const winner = winnerByGame.get(leg.gameId)
+        status = winner === null ? 'void' : winner === leg.selection ? 'won' : 'lost'
+      } else {
+        // Prop legs settle once the match's player stats are ingested
+        const matchStats = leg.providerMatchId ? statsByMatch.get(leg.providerMatchId) : undefined
+        if (!matchStats) continue
+        const playerStats = matchStats.get(leg.playerId)
+        if (!playerStats) {
+          status = 'void' // player didn't take the field
+        } else if (leg.market === 'disposals_ou') {
+          const line = num(leg.statLine)
+          status = leg.side === 'over'
+            ? (playerStats.disposals > line ? 'won' : 'lost')
+            : (playerStats.disposals < line ? 'won' : 'lost')
+        } else if (leg.market === 'anytime_goal') {
+          status = playerStats.goals >= 1 ? 'won' : 'lost'
+        } else {
+          continue
+        }
+      }
+
       await db.query(`UPDATE multi_bet_legs SET status = $1, settled_at = NOW() WHERE id = $2`, [status, leg.id])
       legsSettled++
       touchedBets.add(leg.betId)
