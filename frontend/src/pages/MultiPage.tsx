@@ -111,6 +111,40 @@ interface Bet {
   payout: number | null
   placedAt: string
   legs: BetLeg[]
+  compId: number | null
+  compName: string | null
+}
+
+interface Comp {
+  id: number
+  name: string
+  joinCode: string
+  scopeType: 'game' | 'round'
+  scopeRound: number
+  scopeGameId: number | null
+  buyIn: number
+  startingBudget: number
+  minBet: number | null
+  maxBet: number | null
+  mustSpend: boolean
+  payoutRule: string
+  status: string
+  creatorUserId: number
+  memberCount: number
+  myBalance: number
+  myStaked: number
+  myPayout: number | null
+  myRank: number | null
+}
+
+interface CompLeaderboardRow {
+  userId: number
+  displayName: string
+  balance: number
+  totalStaked: number
+  score: number
+  payout: number | null
+  finalRank: number | null
 }
 
 interface LeaderboardRow {
@@ -156,7 +190,13 @@ export default function MultiPage() {
   const queryClient = useQueryClient()
   const user = useAuthStore((state) => state.user)
 
-  const [view, setView] = useState<'markets' | 'bets' | 'leaderboard'>('markets')
+  const [view, setView] = useState<'markets' | 'bets' | 'comps' | 'leaderboard'>('markets')
+  const [betContext, setBetContext] = useState<number | 'main'>('main')
+  const [expandedCompId, setExpandedCompId] = useState<number | null>(null)
+  const [compForm, setCompForm] = useState({ name: '', scopeType: 'game' as 'game' | 'round', scopeGameId: '', buyIn: '50', startingBudget: '500', minBet: '', maxBet: '', mustSpend: false, payoutRule: 'winner_takes_all' })
+  const [compMsg, setCompMsg] = useState('')
+  const [joinCode, setJoinCode] = useState('')
+  const [showCreateComp, setShowCreateComp] = useState(false)
   const [activeRound, setActiveRound] = useState<number | null>(null)
   const [slip, setSlip] = useState<SlipLeg[]>([])
   const [stakeInput, setStakeInput] = useState('10')
@@ -196,6 +236,54 @@ export default function MultiPage() {
     staleTime: 5 * 60 * 1000,
   })
   const gameProps: GamePropsData | null = propsData?.props ?? null
+
+  const { data: compsData } = useQuery({
+    queryKey: ['multi', 'comps'],
+    queryFn: () => api.get('/multi/comps').then(r => r.data),
+  })
+  const comps: Comp[] = compsData?.comps ?? []
+  const openComps = comps.filter(c => c.status === 'open')
+  const activeComp = betContext !== 'main' ? openComps.find(c => c.id === betContext) ?? null : null
+
+  const { data: compLeaderboardData } = useQuery({
+    queryKey: ['multi', 'comps', expandedCompId, 'leaderboard'],
+    queryFn: () => api.get(`/multi/comps/${expandedCompId}/leaderboard`).then(r => r.data),
+    enabled: expandedCompId != null,
+  })
+  const compLeaderboard: CompLeaderboardRow[] = compLeaderboardData?.leaderboard ?? []
+
+  const createCompMutation = useMutation({
+    mutationFn: () => api.post('/multi/comps', {
+      name: compForm.name,
+      scopeType: compForm.scopeType,
+      scopeRound: compForm.scopeType === 'game'
+        ? (rounds.flatMap(r => r.games).find(g => g.gameId === Number(compForm.scopeGameId))?.round ?? rounds[0]?.round)
+        : rounds[0]?.round,
+      scopeGameId: compForm.scopeType === 'game' ? Number(compForm.scopeGameId) : null,
+      buyIn: Number(compForm.buyIn) || 0,
+      startingBudget: Number(compForm.startingBudget) || 500,
+      minBet: compForm.minBet ? Number(compForm.minBet) : null,
+      maxBet: compForm.maxBet ? Number(compForm.maxBet) : null,
+      mustSpend: compForm.mustSpend,
+      payoutRule: compForm.payoutRule,
+    }),
+    onSuccess: (response) => {
+      setCompMsg(`Comp created — share code ${response.data.joinCode}`)
+      setShowCreateComp(false)
+      queryClient.invalidateQueries({ queryKey: ['multi'] })
+    },
+    onError: (err: any) => setCompMsg(err.response?.data?.error || 'Failed to create comp'),
+  })
+
+  const joinCompMutation = useMutation({
+    mutationFn: () => api.post('/multi/comps/join', { code: joinCode }),
+    onSuccess: () => {
+      setCompMsg('Joined! Bets in this comp use your comp wallet.')
+      setJoinCode('')
+      queryClient.invalidateQueries({ queryKey: ['multi'] })
+    },
+    onError: (err: any) => setCompMsg(err.response?.data?.error || 'Failed to join comp'),
+  })
 
   const balance: number = accountData?.account?.balance ?? 0
   const rounds: MarketRound[] = marketsData?.rounds ?? []
@@ -253,8 +341,8 @@ export default function MultiPage() {
         key: `h2h:${game.gameId}:${teamName}`,
         gameId: game.gameId,
         market: 'h2h',
-        label: teamName,
-        sublabel: `vs ${opponent} · R${game.round}`,
+        label: `${teamName} to beat ${opponent}`,
+        sublabel: `${game.homeTeam} v ${game.awayTeam} · R${game.round}`,
         odds,
         chipTeam: teamName,
         selection: teamName,
@@ -288,6 +376,7 @@ export default function MultiPage() {
   const placeBetMutation = useMutation({
     mutationFn: () => api.post('/multi/bets', {
       stake,
+      compId: betContext === 'main' ? null : betContext,
       legs: slip.map(l => ({ gameId: l.gameId, market: l.market, selection: l.selection, playerId: l.playerId, stat: l.stat, threshold: l.threshold })),
     }),
     onSuccess: (response) => {
@@ -302,7 +391,8 @@ export default function MultiPage() {
     },
   })
 
-  const canPlace = slip.length > 0 && stake > 0 && stake <= balance && !placeBetMutation.isPending
+  const activeBalance = activeComp ? activeComp.myBalance : balance
+  const canPlace = slip.length > 0 && stake > 0 && stake <= activeBalance && !placeBetMutation.isPending
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -340,13 +430,13 @@ export default function MultiPage() {
         {/* View tabs */}
         <div className="flex items-center gap-3 mb-6 flex-wrap">
           <div className="flex rounded-xl bg-slate-100 p-1 gap-1">
-            {(['markets', 'bets', 'leaderboard'] as const).map(tab => (
+            {(['markets', 'bets', 'comps', 'leaderboard'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setView(tab)}
                 className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors capitalize ${view === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
-                {tab === 'markets' ? 'Markets' : tab === 'bets' ? 'My Bets' : 'Leaderboard'}
+                {tab === 'markets' ? 'Markets' : tab === 'bets' ? 'My Bets' : tab === 'comps' ? `Comps${openComps.length > 0 ? ` (${openComps.length})` : ''}` : 'Leaderboard'}
               </button>
             ))}
           </div>
@@ -523,23 +613,54 @@ export default function MultiPage() {
                   <span className="text-xs text-slate-400">{slip.length} leg{slip.length === 1 ? '' : 's'}</span>
                 </div>
 
+                {/* Wallet / comp context */}
+                {openComps.length > 0 && (
+                  <div className="px-4 py-2 bg-slate-800 flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Bet with</span>
+                    <select
+                      value={betContext === 'main' ? 'main' : String(betContext)}
+                      onChange={e => { clearMessages(); setBetContext(e.target.value === 'main' ? 'main' : Number(e.target.value)) }}
+                      className="flex-1 rounded-lg bg-slate-700 text-white text-xs font-semibold px-2 py-1.5 focus:outline-none"
+                    >
+                      <option value="main">Main wallet ({money(balance)})</option>
+                      {openComps.map(c => (
+                        <option key={c.id} value={c.id}>{c.name} ({money(c.myBalance)})</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {slip.length === 0 ? (
                   <div className="px-4 py-10 text-center text-slate-400 text-xs">
                     Tap odds to add legs.<br />Mix match results with player props.
                   </div>
                 ) : (
-                  <div className="divide-y divide-slate-100">
-                    {slip.map(leg => (
-                      <div key={leg.key} className="px-4 py-2.5 flex items-center gap-2">
-                        <TeamChip teamName={leg.chipTeam} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-slate-800 truncate">{leg.label}</p>
-                          <p className="text-[10px] text-slate-400 truncate">{leg.sublabel}</p>
+                  <div>
+                    {/* Legs grouped per game, Sportsbet style */}
+                    {[...new Map(slip.map(l => [l.gameId, l.sublabel])).entries()].map(([gameId, sublabel]) => {
+                      const gameLegs = slip.filter(l => l.gameId === gameId)
+                      return (
+                        <div key={gameId} className="border-b border-slate-100 last:border-0">
+                          <div className="px-4 pt-2 pb-1 flex items-center justify-between">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wide truncate">{sublabel}</span>
+                            {gameLegs.length > 1 && (
+                              <span className="px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[9px] font-black flex-shrink-0">SGM ×{gameLegs.length}</span>
+                            )}
+                          </div>
+                          {gameLegs.map(leg => (
+                            <div key={leg.key} className="px-4 py-2 flex items-center gap-2">
+                              <TeamChip teamName={leg.chipTeam} />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-semibold text-slate-800 truncate">{leg.label}</p>
+                                <p className="text-[10px] text-slate-400 truncate">{leg.market === 'h2h' ? 'Head to Head' : 'Player prop'}</p>
+                              </div>
+                              <span className="text-xs font-black text-slate-700">{leg.odds.toFixed(2)}</span>
+                              <button onClick={() => { clearMessages(); setSlip(prev => prev.filter(l => l.key !== leg.key)) }} className="text-slate-300 hover:text-red-400 text-sm font-bold px-1">×</button>
+                            </div>
+                          ))}
                         </div>
-                        <span className="text-xs font-black text-slate-700">{leg.odds.toFixed(2)}</span>
-                        <button onClick={() => { clearMessages(); setSlip(prev => prev.filter(l => l.key !== leg.key)) }} className="text-slate-300 hover:text-red-400 text-sm font-bold px-1">×</button>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
 
@@ -571,7 +692,7 @@ export default function MultiPage() {
                     <span className="text-slate-500 font-semibold">Potential payout</span>
                     <span className="font-black text-emerald-600">{slip.length > 0 && stake > 0 ? money(estPayout) : '—'}</span>
                   </div>
-                  {stake > balance && <p className="text-[11px] text-red-500 font-semibold">Stake exceeds your balance ({money(balance)})</p>}
+                  {stake > activeBalance && <p className="text-[11px] text-red-500 font-semibold">Stake exceeds your {activeComp ? 'comp' : ''} balance ({money(activeBalance)})</p>}
                   {placeError && <p className="text-[11px] text-red-500 font-semibold">{placeError}</p>}
                   {placeSuccess && <p className="text-[11px] text-emerald-600 font-semibold">{placeSuccess}</p>}
                   <button
@@ -602,6 +723,7 @@ export default function MultiPage() {
                       <div className="flex items-center gap-2">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${statusChip(bet.status)}`}>{bet.status}</span>
                         <span className="text-xs font-bold text-slate-600">{bet.legs.length}-leg {bet.legs.length > 1 ? 'multi' : 'single'} @ {bet.totalOdds.toFixed(2)}</span>
+                        {bet.compName && <span className="px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[9px] font-black">{bet.compName}</span>}
                       </div>
                       <span className="text-[10px] text-slate-400">{new Date(bet.placedAt).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
                     </div>
@@ -627,6 +749,183 @@ export default function MultiPage() {
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* ── COMPS ── */}
+        {view === 'comps' && (
+          <div className="max-w-3xl space-y-4">
+            {compMsg && (
+              <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 text-xs font-semibold text-violet-800 flex items-center justify-between">
+                <span>{compMsg}</span>
+                <button onClick={() => setCompMsg('')} className="text-violet-400 hover:text-violet-600 font-bold">×</button>
+              </div>
+            )}
+
+            {/* Join + create */}
+            <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2 flex-1 min-w-[220px]">
+                <input
+                  type="text"
+                  placeholder="Join code…"
+                  value={joinCode}
+                  onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                  className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-violet-500"
+                />
+                <button
+                  onClick={() => joinCompMutation.mutate()}
+                  disabled={joinCode.length < 4 || joinCompMutation.isPending}
+                  className={`px-4 py-2 rounded-xl text-sm font-bold ${joinCode.length >= 4 ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-100 text-slate-300'}`}
+                >
+                  Join
+                </button>
+              </div>
+              <button
+                onClick={() => setShowCreateComp(v => !v)}
+                className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold"
+              >
+                {showCreateComp ? 'Close' : '+ Create Comp'}
+              </button>
+            </div>
+
+            {/* Create form */}
+            {showCreateComp && (
+              <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+                <input
+                  type="text" placeholder="Comp name (e.g. Thursday Night Footy)" value={compForm.name}
+                  onChange={e => setCompForm(f => ({ ...f, name: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                />
+                <div className="flex gap-2 flex-wrap">
+                  <select
+                    value={compForm.scopeType}
+                    onChange={e => setCompForm(f => ({ ...f, scopeType: e.target.value as 'game' | 'round' }))}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
+                  >
+                    <option value="game">Single game</option>
+                    <option value="round">Whole round ({rounds[0]?.roundname || 'next round'})</option>
+                  </select>
+                  {compForm.scopeType === 'game' && (
+                    <select
+                      value={compForm.scopeGameId}
+                      onChange={e => setCompForm(f => ({ ...f, scopeGameId: e.target.value }))}
+                      className="flex-1 min-w-[200px] rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
+                    >
+                      <option value="">Pick the game…</option>
+                      {rounds[0]?.games.filter(g => !g.locked).map(g => (
+                        <option key={g.gameId} value={g.gameId}>{g.homeTeam} v {g.awayTeam}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Buy-in $
+                    <input type="number" min="0" value={compForm.buyIn} onChange={e => setCompForm(f => ({ ...f, buyIn: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-bold" />
+                  </label>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Budget $
+                    <input type="number" min="1" value={compForm.startingBudget} onChange={e => setCompForm(f => ({ ...f, startingBudget: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-bold" />
+                  </label>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Min bet $
+                    <input type="number" min="0" placeholder="—" value={compForm.minBet} onChange={e => setCompForm(f => ({ ...f, minBet: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-bold" />
+                  </label>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Max bet $
+                    <input type="number" min="0" placeholder="—" value={compForm.maxBet} onChange={e => setCompForm(f => ({ ...f, maxBet: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-bold" />
+                  </label>
+                </div>
+                <div className="flex items-center gap-4 flex-wrap">
+                  <select
+                    value={compForm.payoutRule}
+                    onChange={e => setCompForm(f => ({ ...f, payoutRule: e.target.value }))}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
+                  >
+                    <option value="winner_takes_all">Winner takes all</option>
+                    <option value="podium">Podium 50/30/20</option>
+                  </select>
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                    <input type="checkbox" checked={compForm.mustSpend} onChange={e => setCompForm(f => ({ ...f, mustSpend: e.target.checked }))} />
+                    Must spend budget (unbet money is forfeited)
+                  </label>
+                </div>
+                <button
+                  onClick={() => createCompMutation.mutate()}
+                  disabled={!compForm.name || (compForm.scopeType === 'game' && !compForm.scopeGameId) || createCompMutation.isPending}
+                  className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:bg-slate-100 disabled:text-slate-300 text-white text-sm font-black"
+                >
+                  {createCompMutation.isPending ? 'Creating…' : 'Create Comp'}
+                </button>
+              </div>
+            )}
+
+            {/* My comps */}
+            {comps.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-slate-200 px-6 py-12 text-center text-slate-400 text-sm">
+                No comps yet — create one for tonight's game and share the code.
+              </div>
+            ) : (
+              comps.map(comp => (
+                <div key={comp.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                  <div className="px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-black text-slate-900 truncate">
+                        {comp.name}
+                        <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase align-middle ${comp.status === 'open' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{comp.status}</span>
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        {comp.scopeType === 'game' ? 'Single game' : `Round ${comp.scopeRound}`} · {comp.memberCount} in · buy-in {money(comp.buyIn)} · budget {money(comp.startingBudget)}
+                        {comp.minBet != null ? ` · min ${money(comp.minBet)}` : ''}{comp.maxBet != null ? ` · max ${money(comp.maxBet)}` : ''}
+                        {comp.mustSpend ? ' · must spend' : ''} · {comp.payoutRule === 'podium' ? 'podium 50/30/20' : 'winner takes all'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <div className="text-right">
+                        <p className="text-[9px] text-slate-400 uppercase font-bold">{comp.status === 'open' ? 'Comp balance' : comp.myRank === 1 ? 'Winner!' : `Finished #${comp.myRank ?? '-'}`}</p>
+                        <p className="text-sm font-black text-slate-900">{comp.status === 'open' ? money(comp.myBalance) : comp.myPayout != null && comp.myPayout > 0 ? `+${money(comp.myPayout)}` : money(comp.myBalance)}</p>
+                      </div>
+                      <button
+                        onClick={() => { navigator.clipboard?.writeText(comp.joinCode); setCompMsg(`Code ${comp.joinCode} copied — send it to your mates`) }}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-black tracking-widest text-slate-700"
+                        title="Copy join code"
+                      >
+                        {comp.joinCode}
+                      </button>
+                      <button
+                        onClick={() => setExpandedCompId(expandedCompId === comp.id ? null : comp.id)}
+                        className="text-slate-400 hover:text-slate-600 text-sm font-bold"
+                      >
+                        {expandedCompId === comp.id ? '▲' : '▼'}
+                      </button>
+                    </div>
+                  </div>
+                  {expandedCompId === comp.id && (
+                    <div className="border-t border-slate-100 divide-y divide-slate-50">
+                      {compLeaderboard.map((row, idx) => {
+                        const isMe = row.userId === user?.id
+                        return (
+                          <div key={row.userId} className={`px-4 py-2.5 flex items-center gap-2 ${isMe ? 'bg-violet-50/60' : ''}`}>
+                            <span className={`inline-flex items-center justify-center w-6 h-6 rounded-lg text-[10px] font-black flex-shrink-0 ${idx === 0 ? 'bg-amber-400 text-white' : 'bg-slate-100 text-slate-500'}`}>{row.finalRank ?? idx + 1}</span>
+                            <span className={`flex-1 text-xs font-semibold truncate ${isMe ? 'text-violet-800' : 'text-slate-800'}`}>{row.displayName}{isMe ? ' (you)' : ''}</span>
+                            <span className="text-[10px] text-slate-400">staked {money(row.totalStaked)}</span>
+                            {row.payout != null && row.payout > 0 && <span className="text-[10px] font-black text-emerald-600">+{money(row.payout)} pool</span>}
+                            <span className="text-xs font-black text-slate-900">{money(row.score)}</span>
+                          </div>
+                        )
+                      })}
+                      <div className="px-4 py-2 bg-slate-50 flex items-center justify-between">
+                        <span className="text-[10px] text-slate-400">Pool: {money(comp.buyIn * comp.memberCount)} · paid to {comp.payoutRule === 'podium' ? 'top 3' : 'the winner'} when all games finish</span>
+                        {comp.status === 'open' && (
+                          <button
+                            onClick={() => { setBetContext(comp.id); setView('markets') }}
+                            className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-black"
+                          >
+                            Bet in this comp →
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))
             )}
           </div>
         )}

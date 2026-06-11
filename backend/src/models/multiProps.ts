@@ -1,9 +1,13 @@
 import { db } from '../db'
 import { AflStatsService } from '../services/aflStats'
 import { SquiggleService } from '../services/squiggle'
-import { tailProbNormal, tailProbPoisson, propOdds } from '../utils/multiOdds'
+import { tailProbNormal, tailProbPoisson, propOdds, normalizeProb } from '../utils/multiOdds'
 
 const FORM_GAMES = 5 // games in the weighted form window, most recent weighted highest
+
+// Pricing chips — deliberately small nudges, tune as we go
+const WINPROB_GOAL_SWING = 0.4    // goals lambda scaled by 0.8 + 0.4*pWin (±20% at the extremes)
+const CONCESSION_CLAMP = 0.08     // opponent-concession factor clamped to ±8%
 
 // Sportsbet-style threshold ladders per stat
 export const STAT_LADDERS: Record<string, number[]> = {
@@ -52,7 +56,67 @@ function round2(v: number) {
   return Math.round(v * 100) / 100
 }
 
+interface ConcessionFactors {
+  [teamInternal: string]: Record<string, number>
+}
+
+let concessionCache: { year: number; fetchedAt: number; factors: ConcessionFactors } | null = null
+
 export class MultiPropsModel {
+  /**
+   * Per-team defensive concession factors: how much of each stat a team
+   * gives up per match relative to the league average. >1 = leaky.
+   * Cached for 6 hours — it moves slowly.
+   */
+  static async teamConcessionFactors(year: number): Promise<ConcessionFactors> {
+    const now = Date.now()
+    if (concessionCache && concessionCache.year === year && now - concessionCache.fetchedAt < 6 * 60 * 60 * 1000) {
+      return concessionCache.factors
+    }
+
+    // For each match, each team "concedes" the opposing team's totals
+    const result = await db.query(
+      `WITH match_team_totals AS (
+         SELECT provider_match_id, team_internal,
+                SUM(disposals) AS disposals, SUM(goals) AS goals, SUM(marks) AS marks,
+                SUM(tackles) AS tackles, SUM(clearances) AS clearances, SUM(hitouts) AS hitouts
+         FROM multi_player_stats
+         WHERE season_year = $1
+         GROUP BY provider_match_id, team_internal
+       ),
+       conceded AS (
+         SELECT us.team_internal,
+                AVG(them.disposals)::float AS disposals, AVG(them.goals)::float AS goals,
+                AVG(them.marks)::float AS marks, AVG(them.tackles)::float AS tackles,
+                AVG(them.clearances)::float AS clearances, AVG(them.hitouts)::float AS hitouts
+         FROM match_team_totals us
+         JOIN match_team_totals them
+           ON them.provider_match_id = us.provider_match_id AND them.team_internal != us.team_internal
+         GROUP BY us.team_internal
+       )
+       SELECT * FROM conceded`,
+      [year]
+    )
+
+    const stats = ['disposals', 'goals', 'marks', 'tackles', 'clearances', 'hitouts']
+    const leagueAvg: Record<string, number> = {}
+    for (const stat of stats) {
+      const values = result.rows.map((r: any) => Number(r[stat] || 0))
+      leagueAvg[stat] = values.length ? values.reduce((a: number, b: number) => a + b, 0) / values.length : 0
+    }
+
+    const factors: ConcessionFactors = {}
+    for (const row of result.rows) {
+      factors[row.team_internal] = {}
+      for (const stat of stats) {
+        const raw = leagueAvg[stat] > 0 ? Number(row[stat]) / leagueAvg[stat] : 1
+        factors[row.team_internal][stat] = Math.min(1 + CONCESSION_CLAMP, Math.max(1 - CONCESSION_CLAMP, raw))
+      }
+    }
+    concessionCache = { year, fetchedAt: now, factors }
+    return factors
+  }
+
   /**
    * Ingest player stat lines for any concluded AFL matches we haven't stored yet.
    * Throttled — first run backfills the whole season, later runs pick up new games.
@@ -184,38 +248,50 @@ export class MultiPropsModel {
     )
     if (!aflMatch) return null
 
-    const [homeForm, awayForm] = await Promise.all([
+    const [homeForm, awayForm, probs, concessions] = await Promise.all([
       this.teamPlayerForm(year, game.hteamName),
       this.teamPlayerForm(year, game.ateamName),
+      SquiggleService.fetchHomeProbabilities(year),
+      this.teamConcessionFactors(year),
     ])
 
-    const toMarket = (team: string) => (p: {
-      playerId: string
-      playerName: string
-      listedPosition: string | null
-      games: number
-      means: Record<string, number>
-      stds: Record<string, number>
-    }): PlayerPropMarket => {
-      const rungs: PlayerMarketRung[] = []
-      for (const [stat, ladder] of Object.entries(STAT_LADDERS)) {
-        for (const threshold of ladder) {
-          // Goals are a Poisson count; the rest use a normal tail on the form window
-          const prob = stat === 'goals'
-            ? tailProbPoisson(p.means.goals, threshold)
-            : tailProbNormal(p.means[stat], p.stds[stat] ?? 0, threshold)
-          const priced = propOdds(prob)
-          if (priced) rungs.push({ stat, threshold, odds: priced.odds, prob: priced.prob })
+    const pHome = normalizeProb(probs.get(game.id))
+
+    const toMarket = (team: string, opponent: string, pWin: number) => {
+      // Opponent leakiness nudges every stat; win probability nudges goals
+      const oppFactors = concessions[opponent] || {}
+      const goalWinFactor = 1 - WINPROB_GOAL_SWING / 2 + WINPROB_GOAL_SWING * pWin
+
+      return (p: {
+        playerId: string
+        playerName: string
+        listedPosition: string | null
+        games: number
+        means: Record<string, number>
+        stds: Record<string, number>
+      }): PlayerPropMarket => {
+        const rungs: PlayerMarketRung[] = []
+        for (const [stat, ladder] of Object.entries(STAT_LADDERS)) {
+          const concession = oppFactors[stat] ?? 1
+          const mean = (p.means[stat] || 0) * concession * (stat === 'goals' ? goalWinFactor : 1)
+          for (const threshold of ladder) {
+            // Goals are a Poisson count; the rest use a normal tail on the form window
+            const prob = stat === 'goals'
+              ? tailProbPoisson(mean, threshold)
+              : tailProbNormal(mean, p.stds[stat] ?? 0, threshold)
+            const priced = propOdds(prob)
+            if (priced) rungs.push({ stat, threshold, odds: priced.odds, prob: priced.prob })
+          }
         }
+        const avgs: Record<string, number> = {}
+        for (const stat of Object.keys(STAT_LADDERS)) avgs[stat] = round2(p.means[stat] || 0)
+        return { playerId: p.playerId, playerName: p.playerName, team, listedPosition: p.listedPosition, avgs, rungs }
       }
-      const avgs: Record<string, number> = {}
-      for (const stat of Object.keys(STAT_LADDERS)) avgs[stat] = round2(p.means[stat] || 0)
-      return { playerId: p.playerId, playerName: p.playerName, team, listedPosition: p.listedPosition, avgs, rungs }
     }
 
     const players = [
-      ...homeForm.map(toMarket(game.hteamName)),
-      ...awayForm.map(toMarket(game.ateamName)),
+      ...homeForm.map(toMarket(game.hteamName, game.ateamName, pHome)),
+      ...awayForm.map(toMarket(game.ateamName, game.hteamName, 1 - pHome)),
     ].filter(p => p.rungs.length > 0)
 
     return {

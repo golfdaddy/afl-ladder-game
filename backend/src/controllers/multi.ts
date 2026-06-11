@@ -2,6 +2,7 @@ import { Response } from 'express'
 import { AuthRequest } from '../middleware/auth'
 import { MultiModel } from '../models/multi'
 import { MultiPropsModel } from '../models/multiProps'
+import { MultiCompsModel } from '../models/multiComps'
 import { SeasonModel } from '../models/season'
 
 async function requireSeason(res: Response) {
@@ -45,14 +46,56 @@ export class MultiController {
     const season = await requireSeason(res)
     if (!season) return
 
-    const { stake, legs } = req.body || {}
+    const { stake, legs, compId } = req.body || {}
     try {
-      const result = await MultiModel.placeBet(req.userId, season.id, season.year, Number(stake), legs)
+      const result = await MultiModel.placeBet(req.userId, season.id, season.year, Number(stake), legs, compId ? Number(compId) : null)
       res.status(201).json(result)
     } catch (error: any) {
-      if (error.status === 400) return res.status(400).json({ error: error.message })
+      if (error.status && error.status < 500) return res.status(error.status).json({ error: error.message })
       throw error
     }
+  }
+
+  static async createComp(req: AuthRequest, res: Response) {
+    if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+    const season = await requireSeason(res)
+    if (!season) return
+    try {
+      const result = await MultiCompsModel.createComp(req.userId, season.id, req.body || {})
+      res.status(201).json(result)
+    } catch (error: any) {
+      if (error.status && error.status < 500) return res.status(error.status).json({ error: error.message })
+      throw error
+    }
+  }
+
+  static async joinComp(req: AuthRequest, res: Response) {
+    if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+    const season = await requireSeason(res)
+    if (!season) return
+    try {
+      const result = await MultiCompsModel.joinComp(req.userId, season.id, req.body?.code || '')
+      res.json(result)
+    } catch (error: any) {
+      if (error.status && error.status < 500) return res.status(error.status).json({ error: error.message })
+      throw error
+    }
+  }
+
+  static async myComps(req: AuthRequest, res: Response) {
+    if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+    const season = await requireSeason(res)
+    if (!season) return
+    const comps = await MultiCompsModel.myComps(req.userId, season.id)
+    res.json({ comps })
+  }
+
+  static async compLeaderboard(req: AuthRequest, res: Response) {
+    if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+    const compId = parseInt(req.params.compId)
+    if (!Number.isFinite(compId)) return res.status(400).json({ error: 'Invalid comp id' })
+    const leaderboard = await MultiCompsModel.compLeaderboard(compId)
+    res.json({ leaderboard })
   }
 
   static async getMyBets(req: AuthRequest, res: Response) {

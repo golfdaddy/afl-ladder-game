@@ -3,6 +3,7 @@ import { db } from '../db'
 import { SquiggleService } from '../services/squiggle'
 import { gameOdds } from '../utils/multiOdds'
 import { MultiPropsModel, GameProps } from './multiProps'
+import { MultiCompsModel } from './multiComps'
 
 const START_BALANCE = Number(process.env.MULTI_START_BALANCE || 1000)
 const WEEKLY_TOPUP = Number(process.env.MULTI_WEEKLY_TOPUP || 100)
@@ -174,7 +175,8 @@ export class MultiModel {
     seasonId: number,
     year: number,
     stake: number,
-    legs: BetLegInput[]
+    legs: BetLegInput[],
+    compId?: number | null
   ): Promise<{ betId: number; totalOdds: number; potentialPayout: number; balance: number }> {
     if (!Number.isFinite(stake) || stake <= 0) throw Object.assign(new Error('Stake must be greater than zero'), { status: 400 })
     if (!Array.isArray(legs) || legs.length === 0) throw Object.assign(new Error('A bet needs at least one leg'), { status: 400 })
@@ -315,21 +317,31 @@ export class MultiModel {
 
     const account = await this.getOrCreateAccount(userId, seasonId)
 
+    // Comp bets spend the comp wallet and must sit inside the comp's scope
+    const compMember = compId
+      ? await MultiCompsModel.validateCompBet(compId, userId, roundedStake, resolvedLegs.map(l => ({ gameId: l.gameId, gameRound: l.gameRound })))
+      : null
+
     return db.transaction(async (client) => {
-      // Lock the account row so concurrent bets can't overspend
-      const locked = await client.query(
-        `SELECT id, balance FROM multi_accounts WHERE id = $1 FOR UPDATE`,
-        [account.id]
-      )
-      const balance = num(locked.rows[0].balance)
-      if (balance < roundedStake) {
-        throw Object.assign(new Error(`Insufficient balance — you have $${balance.toFixed(2)}`), { status: 400 })
+      let balance: number
+      if (compId && compMember) {
+        const locked = await client.query(`SELECT balance FROM multi_comp_members WHERE id = $1 FOR UPDATE`, [compMember.memberId])
+        balance = num(locked.rows[0].balance)
+        if (balance < roundedStake) {
+          throw Object.assign(new Error(`Insufficient comp balance — you have $${balance.toFixed(2)}`), { status: 400 })
+        }
+      } else {
+        const locked = await client.query(`SELECT id, balance FROM multi_accounts WHERE id = $1 FOR UPDATE`, [account.id])
+        balance = num(locked.rows[0].balance)
+        if (balance < roundedStake) {
+          throw Object.assign(new Error(`Insufficient balance — you have $${balance.toFixed(2)}`), { status: 400 })
+        }
       }
 
       const betResult = await client.query(
-        `INSERT INTO multi_bets (account_id, stake, total_odds, potential_payout, status)
-         VALUES ($1, $2, $3, $4, 'pending') RETURNING id`,
-        [account.id, roundedStake, totalOdds, potentialPayout]
+        `INSERT INTO multi_bets (account_id, comp_id, stake, total_odds, potential_payout, status)
+         VALUES ($1, $2, $3, $4, $5, 'pending') RETURNING id`,
+        [account.id, compId || null, roundedStake, totalOdds, potentialPayout]
       )
       const betId = betResult.rows[0].id
 
@@ -342,8 +354,15 @@ export class MultiModel {
       }
 
       const newBalance = Math.round((balance - roundedStake) * 100) / 100
-      await client.query(`UPDATE multi_accounts SET balance = $1, updated_at = NOW() WHERE id = $2`, [newBalance, account.id])
-      await insertTransaction(client, account.id, -roundedStake, newBalance, 'bet_stake', betId, `${resolvedLegs.length}-leg multi @ ${totalOdds.toFixed(2)}`)
+      if (compId && compMember) {
+        await client.query(
+          `UPDATE multi_comp_members SET balance = $1, total_staked = total_staked + $2 WHERE id = $3`,
+          [newBalance, roundedStake, compMember.memberId]
+        )
+      } else {
+        await client.query(`UPDATE multi_accounts SET balance = $1, updated_at = NOW() WHERE id = $2`, [newBalance, account.id])
+        await insertTransaction(client, account.id, -roundedStake, newBalance, 'bet_stake', betId, `${resolvedLegs.length}-leg multi @ ${totalOdds.toFixed(2)}`)
+      }
 
       return { betId, totalOdds, potentialPayout, balance: newBalance }
     })
@@ -352,9 +371,11 @@ export class MultiModel {
   static async getUserBets(userId: number, seasonId: number): Promise<MultiBet[]> {
     const result = await db.query(
       `SELECT b.id, b.stake, b.total_odds as "totalOdds", b.potential_payout as "potentialPayout",
-              b.status, b.payout, b.placed_at as "placedAt", b.settled_at as "settledAt"
+              b.status, b.payout, b.placed_at as "placedAt", b.settled_at as "settledAt",
+              b.comp_id as "compId", c.name as "compName"
        FROM multi_bets b
        JOIN multi_accounts a ON b.account_id = a.id
+       LEFT JOIN multi_comps c ON c.id = b.comp_id
        WHERE a.user_id = $1 AND a.season_id = $2
        ORDER BY b.placed_at DESC
        LIMIT 100`,
@@ -494,7 +515,7 @@ export class MultiModel {
   private static async settleBetIfFinished(betId: number): Promise<boolean> {
     return db.transaction(async (client) => {
       const betResult = await client.query(
-        `SELECT id, account_id as "accountId", stake, status FROM multi_bets WHERE id = $1 FOR UPDATE`,
+        `SELECT id, account_id as "accountId", comp_id as "compId", stake, status FROM multi_bets WHERE id = $1 FOR UPDATE`,
         [betId]
       )
       const bet = betResult.rows[0]
@@ -529,14 +550,29 @@ export class MultiModel {
       )
 
       if (payout > 0) {
-        const locked = await client.query(`SELECT balance FROM multi_accounts WHERE id = $1 FOR UPDATE`, [bet.accountId])
-        const newBalance = Math.round((num(locked.rows[0].balance) + payout) * 100) / 100
-        await client.query(`UPDATE multi_accounts SET balance = $1, updated_at = NOW() WHERE id = $2`, [newBalance, bet.accountId])
-        await insertTransaction(
-          client, bet.accountId, payout, newBalance,
-          status === 'void' ? 'bet_void_refund' : 'bet_payout', betId,
-          status === 'void' ? 'All legs void — stake refunded' : 'Multi won'
-        )
+        if (bet.compId) {
+          // Comp bets pay back into the comp wallet
+          const member = await client.query(
+            `SELECT m.id, m.balance FROM multi_comp_members m
+             JOIN multi_accounts a ON a.user_id = m.user_id
+             WHERE m.comp_id = $1 AND a.id = $2
+             FOR UPDATE OF m`,
+            [bet.compId, bet.accountId]
+          )
+          if (member.rows.length > 0) {
+            const newBalance = Math.round((num(member.rows[0].balance) + payout) * 100) / 100
+            await client.query(`UPDATE multi_comp_members SET balance = $1 WHERE id = $2`, [newBalance, member.rows[0].id])
+          }
+        } else {
+          const locked = await client.query(`SELECT balance FROM multi_accounts WHERE id = $1 FOR UPDATE`, [bet.accountId])
+          const newBalance = Math.round((num(locked.rows[0].balance) + payout) * 100) / 100
+          await client.query(`UPDATE multi_accounts SET balance = $1, updated_at = NOW() WHERE id = $2`, [newBalance, bet.accountId])
+          await insertTransaction(
+            client, bet.accountId, payout, newBalance,
+            status === 'void' ? 'bet_void_refund' : 'bet_payout', betId,
+            status === 'void' ? 'All legs void — stake refunded' : 'Multi won'
+          )
+        }
       }
       return true
     })

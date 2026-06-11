@@ -1,6 +1,7 @@
 import { db } from '../db'
 import { MultiModel } from '../models/multi'
 import { MultiPropsModel } from '../models/multiProps'
+import { MultiCompsModel } from '../models/multiComps'
 import { SeasonModel } from '../models/season'
 import { isMultiEnabled } from '../middleware/multiFeature'
 
@@ -53,6 +54,12 @@ export async function runMultiJobs(): Promise<void> {
     const settled = await MultiModel.settleBets(season.id, season.year)
     if (settled.legsSettled > 0 || settled.betsSettled > 0) {
       console.log(`[Multi] Settled ${settled.legsSettled} legs, ${settled.betsSettled} bets`)
+    }
+
+    // Pay out any comps whose scoped games are done and bets settled
+    const finalized = await MultiCompsModel.finalizeComps(season.id, season.year)
+    if (finalized > 0) {
+      console.log(`[Multi] Finalised ${finalized} comp(s)`)
     }
 
     const topup = await MultiModel.weeklyTopup(season.id, currentIsoWeek())
