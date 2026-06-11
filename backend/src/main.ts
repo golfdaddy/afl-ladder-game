@@ -84,10 +84,10 @@ db.connect()
       }, { timezone: APP_TIMEZONE })
       console.log(`[FantasySync] Scheduled: ingestion/pricing/scoring every 30 minutes in ${APP_TIMEZONE}`)
 
-      cron.schedule('*/30 * * * *', () => {
+      cron.schedule('*/10 * * * *', () => {
         runMultiJobs()
       }, { timezone: APP_TIMEZONE })
-      console.log(`[Multi] Scheduled: bet settlement + weekly top-up every 30 minutes in ${APP_TIMEZONE}`)
+      console.log(`[Multi] Scheduled: settlement, top-up, odds board + comp payouts every 10 minutes in ${APP_TIMEZONE}`)
     } else {
       console.log(`[Scheduler] Cron jobs disabled in ${NODE_ENV} environment`);
     }
