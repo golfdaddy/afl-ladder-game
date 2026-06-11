@@ -8,6 +8,20 @@ const FORM_GAMES = 5 // games in the weighted form window, most recent weighted 
 // Pricing chips — deliberately small nudges, tune as we go
 const WINPROB_GOAL_SWING = 0.4    // goals lambda scaled by 0.8 + 0.4*pWin (±20% at the extremes)
 const CONCESSION_CLAMP = 0.08     // opponent-concession factor clamped to ±8%
+const MOMENTUM_WEIGHT = 0.5       // how hard recent-vs-season form pulls the projection
+const MOMENTUM_CLAMP = 0.12       // momentum can shift the projected mean at most ±12%
+
+/**
+ * Nudge a projection toward a player's recent form. If the last 3 games run
+ * hotter (or colder) than their season baseline, shift the mean part-way,
+ * clamped so it stays a chip rather than a lurch.
+ */
+function momentumAdjust(formMean: number, recent3: number, season: number): number {
+  if (season <= 0 || formMean <= 0) return formMean
+  const trend = (recent3 - season) / season // +0.2 = 20% hotter lately
+  const shift = Math.min(MOMENTUM_CLAMP, Math.max(-MOMENTUM_CLAMP, MOMENTUM_WEIGHT * trend))
+  return formMean * (1 + shift)
+}
 
 // Sportsbet-style threshold ladders per stat
 export const STAT_LADDERS: Record<string, number[]> = {
@@ -166,6 +180,8 @@ export class MultiPropsModel {
     games: number
     means: Record<string, number>
     stds: Record<string, number>
+    recent: Record<string, number>
+    season: Record<string, number>
   }>> {
     // Roster = players who took the field in the team's most recent ingested match.
     // Weighted means (recent games heavier) + sample stddev per stat over the form window.
@@ -188,25 +204,39 @@ export class MultiPropsModel {
          JOIN roster r ON r.player_id = s.player_id
          WHERE s.season_year = $1
        )
+       -- Weighted form mean over the window (recent games heavier); stddev over
+       -- the window; plus a recent-3 mean and a full-season mean for momentum.
        SELECT r.player_id as "playerId", r.player_name as "playerName",
               d.listed_position as "listedPosition",
-              COUNT(rec.player_id)::int as games,
-              SUM(rec.disposals  * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "mDisposals",
-              SUM(rec.goals      * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "mGoals",
-              SUM(rec.marks      * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "mMarks",
-              SUM(rec.tackles    * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "mTackles",
-              SUM(rec.clearances * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "mClearances",
-              SUM(rec.hitouts    * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "mHitouts",
-              COALESCE(STDDEV_SAMP(rec.disposals), 0)::float as "sDisposals",
-              COALESCE(STDDEV_SAMP(rec.marks), 0)::float as "sMarks",
-              COALESCE(STDDEV_SAMP(rec.tackles), 0)::float as "sTackles",
-              COALESCE(STDDEV_SAMP(rec.clearances), 0)::float as "sClearances",
-              COALESCE(STDDEV_SAMP(rec.hitouts), 0)::float as "sHitouts"
+              COUNT(rec.player_id) FILTER (WHERE rec.rn <= $3)::int as games,
+              SUM(rec.disposals  * ($3 + 1 - rec.rn)) FILTER (WHERE rec.rn <= $3)::float / NULLIF(SUM($3 + 1 - rec.rn) FILTER (WHERE rec.rn <= $3), 0) as "mDisposals",
+              SUM(rec.goals      * ($3 + 1 - rec.rn)) FILTER (WHERE rec.rn <= $3)::float / NULLIF(SUM($3 + 1 - rec.rn) FILTER (WHERE rec.rn <= $3), 0) as "mGoals",
+              SUM(rec.marks      * ($3 + 1 - rec.rn)) FILTER (WHERE rec.rn <= $3)::float / NULLIF(SUM($3 + 1 - rec.rn) FILTER (WHERE rec.rn <= $3), 0) as "mMarks",
+              SUM(rec.tackles    * ($3 + 1 - rec.rn)) FILTER (WHERE rec.rn <= $3)::float / NULLIF(SUM($3 + 1 - rec.rn) FILTER (WHERE rec.rn <= $3), 0) as "mTackles",
+              SUM(rec.clearances * ($3 + 1 - rec.rn)) FILTER (WHERE rec.rn <= $3)::float / NULLIF(SUM($3 + 1 - rec.rn) FILTER (WHERE rec.rn <= $3), 0) as "mClearances",
+              SUM(rec.hitouts    * ($3 + 1 - rec.rn)) FILTER (WHERE rec.rn <= $3)::float / NULLIF(SUM($3 + 1 - rec.rn) FILTER (WHERE rec.rn <= $3), 0) as "mHitouts",
+              COALESCE(STDDEV_SAMP(rec.disposals)  FILTER (WHERE rec.rn <= $3), 0)::float as "sDisposals",
+              COALESCE(STDDEV_SAMP(rec.marks)      FILTER (WHERE rec.rn <= $3), 0)::float as "sMarks",
+              COALESCE(STDDEV_SAMP(rec.tackles)    FILTER (WHERE rec.rn <= $3), 0)::float as "sTackles",
+              COALESCE(STDDEV_SAMP(rec.clearances) FILTER (WHERE rec.rn <= $3), 0)::float as "sClearances",
+              COALESCE(STDDEV_SAMP(rec.hitouts)    FILTER (WHERE rec.rn <= $3), 0)::float as "sHitouts",
+              AVG(rec.disposals)  FILTER (WHERE rec.rn <= 3)::float as "r3Disposals",
+              AVG(rec.goals)      FILTER (WHERE rec.rn <= 3)::float as "r3Goals",
+              AVG(rec.marks)      FILTER (WHERE rec.rn <= 3)::float as "r3Marks",
+              AVG(rec.tackles)    FILTER (WHERE rec.rn <= 3)::float as "r3Tackles",
+              AVG(rec.clearances) FILTER (WHERE rec.rn <= 3)::float as "r3Clearances",
+              AVG(rec.hitouts)    FILTER (WHERE rec.rn <= 3)::float as "r3Hitouts",
+              AVG(rec.disposals)::float  as "snDisposals",
+              AVG(rec.goals)::float      as "snGoals",
+              AVG(rec.marks)::float      as "snMarks",
+              AVG(rec.tackles)::float    as "snTackles",
+              AVG(rec.clearances)::float as "snClearances",
+              AVG(rec.hitouts)::float    as "snHitouts"
        FROM roster r
        LEFT JOIN multi_players d ON d.player_id = r.player_id
-       JOIN recent rec ON rec.player_id = r.player_id AND rec.rn <= $3
+       JOIN recent rec ON rec.player_id = r.player_id
        GROUP BY r.player_id, r.player_name, d.listed_position
-       ORDER BY "mDisposals" DESC`,
+       ORDER BY "mDisposals" DESC NULLS LAST`,
       [year, teamInternal, FORM_GAMES]
     )
     return result.rows.map((r: any) => ({
@@ -228,6 +258,22 @@ export class MultiPropsModel {
         tackles: Number(r.sTackles || 0),
         clearances: Number(r.sClearances || 0),
         hitouts: Number(r.sHitouts || 0),
+      },
+      recent: {
+        disposals: Number(r.r3Disposals ?? r.mDisposals ?? 0),
+        goals: Number(r.r3Goals ?? r.mGoals ?? 0),
+        marks: Number(r.r3Marks ?? r.mMarks ?? 0),
+        tackles: Number(r.r3Tackles ?? r.mTackles ?? 0),
+        clearances: Number(r.r3Clearances ?? r.mClearances ?? 0),
+        hitouts: Number(r.r3Hitouts ?? r.mHitouts ?? 0),
+      },
+      season: {
+        disposals: Number(r.snDisposals ?? r.mDisposals ?? 0),
+        goals: Number(r.snGoals ?? r.mGoals ?? 0),
+        marks: Number(r.snMarks ?? r.mMarks ?? 0),
+        tackles: Number(r.snTackles ?? r.mTackles ?? 0),
+        clearances: Number(r.snClearances ?? r.mClearances ?? 0),
+        hitouts: Number(r.snHitouts ?? r.mHitouts ?? 0),
       },
     }))
   }
@@ -269,11 +315,15 @@ export class MultiPropsModel {
         games: number
         means: Record<string, number>
         stds: Record<string, number>
+        recent: Record<string, number>
+        season: Record<string, number>
       }): PlayerPropMarket => {
         const rungs: PlayerMarketRung[] = []
         for (const [stat, ladder] of Object.entries(STAT_LADDERS)) {
           const concession = oppFactors[stat] ?? 1
-          const mean = (p.means[stat] || 0) * concession * (stat === 'goals' ? goalWinFactor : 1)
+          // Form mean → momentum-adjusted toward recent-3 vs season → matchup chips
+          const formMean = momentumAdjust(p.means[stat] || 0, p.recent[stat] ?? 0, p.season[stat] ?? 0)
+          const mean = formMean * concession * (stat === 'goals' ? goalWinFactor : 1)
           for (const threshold of ladder) {
             // Goals are a Poisson count; the rest use a normal tail on the form window
             const prob = stat === 'goals'
