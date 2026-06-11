@@ -539,7 +539,7 @@ export default function MultiPage() {
                                   key={side}
                                   disabled={game.locked}
                                   onClick={() => toggleSelection(game, side)}
-                                  className={`flex-1 flex items-center justify-between gap-2 px-4 py-3 transition-colors ${side === 'home' ? 'border-r border-slate-100' : ''} ${game.locked ? 'cursor-not-allowed' : isPicked ? 'bg-violet-50' : 'hover:bg-slate-50'}`}
+                                  className={`flex-1 min-w-0 flex items-center justify-between gap-2 px-3 sm:px-4 py-3 transition-colors ${side === 'home' ? 'border-r border-slate-100' : ''} ${game.locked ? 'cursor-not-allowed' : isPicked ? 'bg-violet-50' : 'hover:bg-slate-50'}`}
                                 >
                                   <div className="flex items-center gap-2 min-w-0">
                                     <TeamChip teamName={team} />
@@ -653,7 +653,7 @@ export default function MultiPage() {
             </div>
 
             {/* Bet slip */}
-            <div className="lg:w-80 w-full flex-shrink-0 lg:sticky lg:top-6">
+            <div id="bet-slip" className="lg:w-80 w-full flex-shrink-0 lg:sticky lg:top-6 scroll-mt-4 pb-20 lg:pb-0">
               <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
                 <div className="px-4 py-3 bg-slate-900 flex items-center justify-between">
                   <span className="text-sm font-bold text-white">Bet Slip</span>
@@ -752,6 +752,20 @@ export default function MultiPage() {
                 </div>
               </div>
             </div>
+
+            {/* Mobile sticky slip summary — taps through to the slip below */}
+            {slip.length > 0 && (
+              <button
+                onClick={() => document.getElementById('bet-slip')?.scrollIntoView({ behavior: 'smooth' })}
+                className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-violet-600 text-white px-4 py-3 flex items-center justify-between shadow-[0_-4px_16px_rgba(0,0,0,0.15)]"
+              >
+                <span className="text-sm font-bold">{slip.length} leg{slip.length === 1 ? '' : 's'} · {slipOdds.toFixed(2)}</span>
+                <span className="text-sm font-black flex items-center gap-1.5">
+                  View slip
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
+                </span>
+              </button>
+            )}
           </div>
         )}
 

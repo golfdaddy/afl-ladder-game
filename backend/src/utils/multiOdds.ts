@@ -48,6 +48,24 @@ export function tailProbNormal(mean: number, std: number, threshold: number): nu
   return 1 - normalCdf(threshold - 0.5, mean, safeStd)
 }
 
+/**
+ * P(count >= threshold) from a player's actual game-by-game history, using a
+ * kernel-density estimate. Each past game is a Gaussian bump of width
+ * `bandwidth`, so a 29 contributes real probability to a 30+ rung (proximity)
+ * while preserving the player's true spread — a metronome stays tight, a
+ * boom-or-bust player keeps his fat tail. `shift` scales every past game for
+ * form/matchup (e.g. 0.9 = expect ~10% below their historical baseline).
+ * Threshold gets a -0.5 continuity correction since all AFL counts are integers.
+ */
+export function tailProbKde(values: number[], threshold: number, bandwidth: number, shift = 1): number {
+  if (values.length === 0) return 0
+  const t = threshold - 0.5
+  const h = Math.max(0.3, bandwidth)
+  let sum = 0
+  for (const v of values) sum += 1 - normalCdf(t, v * shift, h)
+  return Math.min(0.999, Math.max(0, sum / values.length))
+}
+
 /** P(count >= threshold) for goals, Poisson tail. */
 export function tailProbPoisson(lambda: number, threshold: number): number {
   if (lambda <= 0) return 0

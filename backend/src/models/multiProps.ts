@@ -1,7 +1,7 @@
 import { db } from '../db'
 import { AflStatsService } from '../services/aflStats'
 import { SquiggleService } from '../services/squiggle'
-import { tailProbNormal, tailProbPoisson, propOdds, normalizeProb } from '../utils/multiOdds'
+import { tailProbNormal, tailProbPoisson, tailProbKde, propOdds, normalizeProb } from '../utils/multiOdds'
 
 const FORM_GAMES = 5 // games in the weighted form window, most recent weighted highest
 
@@ -10,22 +10,25 @@ const WINPROB_GOAL_SWING = 0.4    // goals lambda scaled by 0.8 + 0.4*pWin (±20
 const CONCESSION_CLAMP = 0.08     // opponent-concession factor clamped to ±8%
 const MOMENTUM_WEIGHT = 0.5       // how hard recent-vs-season form pulls the projection
 const MOMENTUM_CLAMP = 0.12       // momentum can shift the projected mean at most ±12%
-const EMPIRICAL_WEIGHT = 0.7      // how much a player's actual hit-rate history anchors a rung
-const EMPIRICAL_FULL_SAMPLE = 6   // games of history for full empirical weight (scaled below)
+const MIN_HISTORY = 3             // games of history needed to price off the KDE
 
-/**
- * Blend the model's tail probability with how often the player has ACTUALLY
- * cleared this rung. Captures boom-or-bust ceilings a thin form curve misses
- * (e.g. a key forward who averages 2 goals but kicks 3+ a third of the time).
- * Empirical weight scales with sample size so early-season noise is dampened.
- */
-function blendEmpirical(modelProb: number, gameValues: number[], threshold: number): number {
-  const n = gameValues.length
-  if (n < 3) return modelProb // too few games to trust the history
-  const hits = gameValues.reduce((c, v) => c + (v >= threshold ? 1 : 0), 0)
-  const empProb = hits / n
-  const weight = EMPIRICAL_WEIGHT * Math.min(1, n / EMPIRICAL_FULL_SAMPLE)
-  return weight * empProb + (1 - weight) * modelProb
+// Kernel bandwidth per stat (~0.7× typical game-to-game SD). Wider = more spread
+// credited to proximity. Goals are tight (discrete, low count); disposals/hitouts
+// are wide. This is where disposals and goals get genuinely different models.
+const STAT_BANDWIDTH: Record<string, number> = {
+  disposals: 3.0,
+  goals: 0.85,
+  marks: 1.5,
+  tackles: 1.5,
+  clearances: 1.5,
+  hitouts: 4.0,
+}
+
+/** Multiplicative form nudge: recent-3 vs season, same magnitude as the mean-based momentum chip. */
+function momentumFactor(recent3: number, season: number): number {
+  if (season <= 0) return 1
+  const trend = (recent3 - season) / season
+  return 1 + Math.min(MOMENTUM_CLAMP, Math.max(-MOMENTUM_CLAMP, MOMENTUM_WEIGHT * trend))
 }
 
 /**
@@ -354,17 +357,21 @@ export class MultiPropsModel {
         const rungs: PlayerMarketRung[] = []
         for (const [stat, ladder] of Object.entries(STAT_LADDERS)) {
           const concession = oppFactors[stat] ?? 1
-          // Form mean → momentum-adjusted toward recent-3 vs season → matchup chips
-          const formMean = momentumAdjust(p.means[stat] || 0, p.recent[stat] ?? 0, p.season[stat] ?? 0)
-          const mean = formMean * concession * (stat === 'goals' ? goalWinFactor : 1)
           const history = p.gameValues[stat] ?? []
+          // Form/matchup as a multiplicative shift on the historical distribution
+          const shift = momentumFactor(p.recent[stat] ?? 0, p.season[stat] ?? 0) * concession * (stat === 'goals' ? goalWinFactor : 1)
+          const bandwidth = STAT_BANDWIDTH[stat] ?? 2
+
           for (const threshold of ladder) {
-            // Goals are a Poisson count; the rest use a normal tail on the form window
-            const modelProb = stat === 'goals'
-              ? tailProbPoisson(mean, threshold)
-              : tailProbNormal(mean, p.stds[stat] ?? 0, threshold)
-            // Anchor to how often they've actually cleared this rung (controls spread)
-            const prob = blendEmpirical(modelProb, history, threshold)
+            let prob: number
+            if (history.length >= MIN_HISTORY) {
+              // Kernel-density tail over actual games: proximity-aware + true spread
+              prob = tailProbKde(history, threshold, bandwidth, shift)
+            } else {
+              // Too few games — fall back to a parametric tail on the form mean
+              const mean = momentumAdjust(p.means[stat] || 0, p.recent[stat] ?? 0, p.season[stat] ?? 0) * concession * (stat === 'goals' ? goalWinFactor : 1)
+              prob = stat === 'goals' ? tailProbPoisson(mean, threshold) : tailProbNormal(mean, p.stds[stat] ?? 0, threshold)
+            }
             const priced = propOdds(prob)
             if (priced) rungs.push({ stat, threshold, odds: priced.odds, prob: priced.prob })
           }
