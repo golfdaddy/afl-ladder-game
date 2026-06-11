@@ -45,7 +45,7 @@ export class SevensController {
     if (!season) return
     const round = await SevensModel.getActiveRound(season.id, season.year)
     if (!round) return res.status(404).json({ error: 'No active round' })
-    const leaderboard = await SevensModel.getLeaderboard(round.id)
+    const leaderboard = await SevensModel.getLeaderboard(round.id, season.year, round.round)
     res.json({ leaderboard })
   }
 }

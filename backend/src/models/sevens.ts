@@ -464,14 +464,29 @@ export class SevensModel {
     return scored
   }
 
-  static async getLeaderboard(sevensRoundId: number) {
+  /**
+   * Live leaderboard: each team's running fantasy score and how many of their
+   * seven have played so far this round (scored live from ingested stats, so it
+   * updates through the week as games complete).
+   */
+  static async getLeaderboard(sevensRoundId: number, year: number, round: number) {
     const result = await db.query(
-      `SELECT t.user_id as "userId", u.display_name as "displayName", t.total_price as "totalPrice", t.score
-       FROM sevens_teams t JOIN users u ON u.id = t.user_id
+      `SELECT t.user_id as "userId", u.display_name as "displayName", t.total_price as "totalPrice",
+              COUNT(s.id)::int as "played",
+              COUNT(tp.id)::int as "teamSize",
+              COALESCE(ROUND(SUM(s.dream_team_points), 1), 0)::float as "score"
+       FROM sevens_teams t
+       JOIN users u ON u.id = t.user_id
+       LEFT JOIN sevens_team_players tp ON tp.team_id = t.id
+       LEFT JOIN multi_player_stats s ON s.player_id = tp.player_id AND s.season_year = $2 AND s.round = $3
        WHERE t.sevens_round_id = $1
-       ORDER BY t.score DESC NULLS LAST, t.total_price ASC`,
-      [sevensRoundId]
+       GROUP BY t.user_id, u.display_name, t.total_price
+       ORDER BY "score" DESC, "played" DESC, t.total_price ASC`,
+      [sevensRoundId, year, round]
     )
-    return result.rows.map((r: any) => ({ ...r, totalPrice: num(r.totalPrice), score: r.score == null ? null : num(r.score) }))
+    return result.rows.map((r: any) => ({
+      userId: r.userId, displayName: r.displayName,
+      totalPrice: num(r.totalPrice), played: r.played, teamSize: r.teamSize, score: num(r.score),
+    }))
   }
 }

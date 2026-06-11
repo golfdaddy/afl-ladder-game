@@ -393,19 +393,28 @@ export default function SevensPage() {
             {leaderboard.length === 0 ? (
               <div className="bg-white rounded-2xl border border-slate-200 px-6 py-16 text-center text-slate-400 text-sm">No teams in yet — build yours.</div>
             ) : (
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
-                {leaderboard.map((row: any, idx: number) => {
-                  const isMe = row.userId === user?.id
-                  return (
-                    <div key={row.userId} className={`flex items-center gap-3 px-4 py-3 ${isMe ? 'bg-emerald-50/60' : ''}`}>
-                      <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-black flex-shrink-0 ${idx === 0 ? 'bg-amber-400 text-white' : 'bg-slate-100 text-slate-500'}`}>{idx + 1}</span>
-                      <span className={`flex-1 text-sm font-semibold truncate ${isMe ? 'text-emerald-800' : 'text-slate-900'}`}>{row.displayName}{isMe ? ' (you)' : ''}</span>
-                      <span className="text-[10px] text-slate-400 inline-flex items-center gap-0.5"><FreakCoin size={11} />{row.totalPrice}</span>
-                      <span className="text-sm font-black text-slate-900">{row.score == null ? '—' : row.score}</span>
-                    </div>
-                  )
-                })}
-              </div>
+              <>
+                <div className="flex items-center gap-3 px-4 pb-1.5 text-[10px] font-black text-slate-400 uppercase tracking-wide">
+                  <span className="w-7 flex-shrink-0">#</span>
+                  <span className="flex-1">Manager</span>
+                  <span className="w-14 text-center">Played</span>
+                  <span className="w-12 text-right">Score</span>
+                </div>
+                <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
+                  {leaderboard.map((row: any, idx: number) => {
+                    const isMe = row.userId === user?.id
+                    return (
+                      <div key={row.userId} className={`flex items-center gap-3 px-4 py-3 ${isMe ? 'bg-emerald-50/60' : ''}`}>
+                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-black flex-shrink-0 ${idx === 0 ? 'bg-amber-400 text-white' : 'bg-slate-100 text-slate-500'}`}>{idx + 1}</span>
+                        <span className={`flex-1 min-w-0 text-sm font-semibold truncate ${isMe ? 'text-emerald-800' : 'text-slate-900'}`}>{row.displayName}{isMe ? ' (you)' : ''}</span>
+                        <span className="w-14 text-center text-xs font-semibold text-slate-500">{row.played}/{row.teamSize || 7}</span>
+                        <span className="w-12 text-right text-sm font-black text-slate-900">{row.score}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-2 px-1">Live fantasy score across your seven. "Played" = how many have had their game. Highest score wins the week.</p>
+              </>
             )}
           </div>
         )}
