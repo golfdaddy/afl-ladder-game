@@ -20,6 +20,7 @@ interface PoolPlayer {
   isHome: boolean | null
   gameStart: string | null
   locked: boolean
+  named: boolean | null
 }
 
 /** Coin icon + amount — the Freakazoid price. */
@@ -230,7 +231,7 @@ export default function SevensPage() {
                   const pid = picks[i]
                   const player = pid ? poolById.get(pid) : null
                   const tp = existingTeam?.players.find(p => p.playerId === pid)
-                  const slotLocked = locked || !!player?.locked // round done, or this player's game started
+                  const slotLocked = locked || !!player?.locked || player?.named === false // round done, game started, or late-out
                   return (
                     <button
                       key={i}
@@ -245,6 +246,7 @@ export default function SevensPage() {
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-bold text-slate-900 truncate flex items-center gap-1.5">
                               <span className="truncate">{player.playerName}</span>
+                              {player.named === false && <span className="text-[9px] font-black text-red-600 bg-red-100 rounded px-1 py-0.5 flex-shrink-0">OUT</span>}
                               {player.locked && <span title="Game started — locked" className="text-[10px] flex-shrink-0">🔒</span>}
                               <OpponentBadge player={player} />
                               {tp?.points != null ? <span className="text-[10px] font-black text-emerald-600 flex-shrink-0">scored {tp.points}</span> : null}
@@ -299,7 +301,7 @@ export default function SevensPage() {
                     <div className="max-h-[28rem] overflow-y-auto divide-y divide-slate-100 mt-2">
                       {eligibleForSlot.map(p => {
                         const affordable = p.price <= remaining + (picks[activeSlot] ? (poolById.get(picks[activeSlot]!)?.price || 0) : 0)
-                        const selectable = affordable && !p.locked
+                        const selectable = affordable && !p.locked && p.named !== false
                         return (
                           <button key={p.playerId} onClick={() => selectable && assignPlayer(p.playerId)} disabled={!selectable}
                             className={`w-full flex items-center gap-2 px-3 py-2 text-left ${selectable ? 'hover:bg-emerald-50' : 'opacity-40 cursor-not-allowed'}`}>
@@ -307,6 +309,7 @@ export default function SevensPage() {
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-semibold text-slate-800 truncate flex items-center gap-1.5">
                                 <span className="truncate">{p.playerName}</span>
+                                {p.named === false && <span className="text-[9px] font-black text-red-600 bg-red-100 rounded px-1 py-0.5 flex-shrink-0">OUT</span>}
                                 {p.locked && <span title="Game started — locked" className="text-[10px] flex-shrink-0">🔒</span>}
                                 {p.positions.length > 1 && <span className="text-[9px] font-black text-slate-400 flex-shrink-0">{p.positions.join('/')}</span>}
                                 <OpponentBadge player={p} />

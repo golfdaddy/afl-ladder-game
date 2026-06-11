@@ -83,6 +83,7 @@ export interface PoolPlayer {
   isHome: boolean | null
   gameStart: string | null
   locked: boolean         // their game has started — can't be added/removed
+  named: boolean | null   // in this round's named team (false = omitted/late-out; null = teams not named yet)
 }
 
 export class SevensModel {
@@ -148,6 +149,19 @@ export class SevensModel {
   }
 
   /**
+   * Named-team info for the round (per-team, since clubs are named at staggered
+   * times). Returns null on error so nothing gets wrongly flagged.
+   */
+  private static async namedSet(year: number, roundNumber: number) {
+    const { AflStatsService } = await import('../services/aflStats')
+    try {
+      return await AflStatsService.fetchNamedPlayers(year, roundNumber)
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Build the priced player pool. Within each position, players are ranked by
    * fantasy average and priced on a steep 1–10 curve: only the top ~4% are Ƒ10,
    * so the elite are exclusive and there's gradation among the guns rather than
@@ -203,6 +217,7 @@ export class SevensModel {
 
   static async getPool(sevensRoundId: number, year: number, roundNumber?: number): Promise<PoolPlayer[]> {
     const opponentByTeam = await this.roundFixture(year, roundNumber)
+    const named = roundNumber != null ? await this.namedSet(year, roundNumber) : null
     const now = Date.now()
 
     // Form (last 5 scores) computed fresh so it tracks the live season,
@@ -242,10 +257,13 @@ export class SevensModel {
           isHome: opp?.isHome ?? null,
           gameStart,
           locked: gameStart ? new Date(gameStart).getTime() <= now : false,
+          // named only once their club's squad is up: true = in it, false = omitted/late-out
+          named: named && named.namedTeams.has(r.team) ? named.named.has(r.playerId) : null,
         }
       })
-    // Locked players (game started) sink to the bottom of their price tier
-    players.sort((a, b) => (a.locked === b.locked ? 0 : a.locked ? 1 : -1) || b.price - a.price)
+    // Unselectable players (game started, or not named in the team) sink to the bottom
+    const unselectable = (p: PoolPlayer) => p.locked || p.named === false
+    players.sort((a, b) => (unselectable(a) === unselectable(b) ? 0 : unselectable(a) ? 1 : -1) || b.price - a.price)
     return players
   }
 
@@ -314,6 +332,16 @@ export class SevensModel {
 
     if (totalPrice > round.budget) {
       throw Object.assign(new Error(`Over budget by ${totalPrice - round.budget} — cap is ${round.budget}`), { status: 400 })
+    }
+
+    // Can't field a player whose club is named but who isn't in the squad (late-outs)
+    const named = await this.namedSet(year, round.round)
+    if (named) {
+      for (const r of resolved) {
+        if (named.namedTeams.has(r.team) && !named.named.has(r.playerId)) {
+          throw Object.assign(new Error(`${poolById.get(r.playerId)!.playerName} isn't named in this round's team — pick someone else`), { status: 400 })
+        }
+      }
     }
 
     // Per-game lock enforcement. Players whose game has started are frozen:

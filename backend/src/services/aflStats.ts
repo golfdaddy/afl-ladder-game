@@ -109,6 +109,11 @@ function request<T>(options: { hostname: string; path: string; method?: string; 
   })
 }
 
+export interface NamedTeams {
+  named: Set<string>       // player ids named across all named squads
+  namedTeams: Set<string>  // internal team names whose squad is up
+}
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 export class AflStatsService {
@@ -209,6 +214,45 @@ export class AflStatsService {
       }).filter(p => p.playerId)
 
     return [...mapSide(data.homeTeamPlayerStats, homeTeam), ...mapSide(data.awayTeamPlayerStats, awayTeam)]
+  }
+
+  private static namedCache: { key: string; fetchedAt: number; result: NamedTeams } | null = null
+
+  /**
+   * Named players for the round. Teams are named at staggered times, so we
+   * track WHICH clubs have a named squad (namedTeams) alongside the named
+   * player ids — letting callers tell "omitted/late-out" (team named, player
+   * absent) apart from "not named yet" (team's squad not up). 15-min cache.
+   */
+  static async fetchNamedPlayers(year: number, roundNumber: number): Promise<NamedTeams> {
+    const key = `${year}-${roundNumber}`
+    const now = Date.now()
+    if (this.namedCache && this.namedCache.key === key && now - this.namedCache.fetchedAt < 15 * 60 * 1000) {
+      return this.namedCache.result
+    }
+    const token = await this.getToken()
+    const matches = (await this.fetchMatches(year)).filter(m => m.round === roundNumber && m.status !== 'CONCLUDED')
+    const named = new Set<string>()
+    const namedTeams = new Set<string>()
+    for (const m of matches) {
+      try {
+        const data = await request<{ homeTeam?: any; awayTeam?: any }>({
+          hostname: 'api.afl.com.au',
+          path: `/cfs/afl/matchRoster/${m.providerId}`,
+          headers: { 'x-media-mis-token': token },
+        })
+        for (const [side, teamInternal] of [[data.homeTeam, m.homeTeam], [data.awayTeam, m.awayTeam]] as const) {
+          const ids = (side?.positions || []).map((r: any) => r?.player?.playerId).filter(Boolean)
+          if (ids.length >= 18) { // a real named squad (final ~23 / provisional ~26)
+            namedTeams.add(teamInternal)
+            for (const id of ids) named.add(id)
+          }
+        }
+      } catch { /* a missing roster just leaves those teams 'not named yet' */ }
+    }
+    const result = { named, namedTeams }
+    this.namedCache = { key, fetchedAt: now, result }
+    return result
   }
 
   /** Map of internal team name -> AFL API team id, derived from the season fixture. */
