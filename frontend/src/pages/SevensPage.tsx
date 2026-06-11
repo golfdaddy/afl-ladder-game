@@ -111,9 +111,11 @@ export default function SevensPage() {
   const [priceFilter, setPriceFilter] = useState<number | 'ALL'>('ALL')
   const [sortBy, setSortBy] = useState<'price' | 'avg' | 'l5'>('price')
 
-  const { data: roundData } = useQuery({
+  const { data: roundData, dataUpdatedAt } = useQuery({
     queryKey: ['sevens', 'round'],
     queryFn: () => api.get('/sevens/round').then(r => r.data),
+    refetchInterval: 30 * 60 * 1000, // pull team news (ins/outs), prices, locks every half hour
+    refetchOnWindowFocus: true,      // and whenever they come back to the tab
   })
 
   const round: SevensRound | undefined = roundData?.round
@@ -151,6 +153,7 @@ export default function SevensPage() {
   const remaining = budget - spent
   const filledCount = picks.filter(Boolean).length
   const locked = round?.status !== 'open'
+  const outInTeam = picks.filter(pid => pid && poolById.get(pid)?.named === false).length
 
   const pickedIds = useMemo(() => new Set(picks.filter(Boolean) as string[]), [picks])
 
@@ -240,7 +243,10 @@ export default function SevensPage() {
               </button>
             ))}
           </div>
-          <p className="text-xs text-slate-400">Round {round?.round ?? ''} — build your seven and lock it in.</p>
+          <p className="text-xs text-slate-400">
+            Round {round?.round ?? ''} — build your seven and lock it in.
+            {dataUpdatedAt > 0 && <span className="text-slate-300"> · ins &amp; outs auto-update (last checked {new Date(dataUpdatedAt).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })})</span>}
+          </p>
         </div>
 
         {/* ── TEAM BUILDER ── */}
@@ -262,18 +268,26 @@ export default function SevensPage() {
                   Round {round?.round} is locked — teams are final. {round?.status === 'scored' ? 'Scores are in.' : 'Games are underway.'}
                 </div>
               )}
+              {/* Late-out warning: a saved player has been dropped from their team */}
+              {!locked && outInTeam > 0 && (
+                <div className="mb-3 px-4 py-2.5 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-700">
+                  ⚠ {outInTeam} player{outInTeam > 1 ? 's' : ''} in your team {outInTeam > 1 ? 'are' : 'is'} OUT of this week's team — swap {outInTeam > 1 ? 'them' : 'it'} before their game or you'll score 0 there.
+                </div>
+              )}
               <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-2">
                 {slots.map((slot, i) => {
                   const pid = picks[i]
                   const player = pid ? poolById.get(pid) : null
                   const tp = existingTeam?.players.find(p => p.playerId === pid)
-                  const slotLocked = locked || !!player?.locked || player?.named === false // round done, game started, or late-out
+                  // Frozen only when the round's done or the player's game has started.
+                  // A late-out (named===false) stays editable so you can replace them.
+                  const slotLocked = locked || !!player?.locked
                   return (
                     <button
                       key={i}
                       disabled={slotLocked}
                       onClick={() => tapSlot(i)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${activeSlot === i ? 'border-emerald-400 bg-emerald-50/40' : player ? 'border-slate-200' : 'border-dashed border-slate-300'} ${player?.locked ? 'bg-slate-50' : ''} ${slotLocked ? 'cursor-default' : 'hover:border-emerald-300'}`}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${player?.named === false ? 'border-red-300 bg-red-50/50' : activeSlot === i ? 'border-emerald-400 bg-emerald-50/40' : player ? 'border-slate-200' : 'border-dashed border-slate-300'} ${player?.locked ? 'bg-slate-50' : ''} ${slotLocked ? 'cursor-default' : 'hover:border-emerald-300'}`}
                     >
                       <span className="w-9 text-[10px] font-black text-slate-400 uppercase flex-shrink-0">{SLOT_SHORT[slot]}</span>
                       {player ? (
