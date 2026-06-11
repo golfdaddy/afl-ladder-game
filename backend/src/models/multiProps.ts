@@ -10,6 +10,23 @@ const WINPROB_GOAL_SWING = 0.4    // goals lambda scaled by 0.8 + 0.4*pWin (±20
 const CONCESSION_CLAMP = 0.08     // opponent-concession factor clamped to ±8%
 const MOMENTUM_WEIGHT = 0.5       // how hard recent-vs-season form pulls the projection
 const MOMENTUM_CLAMP = 0.12       // momentum can shift the projected mean at most ±12%
+const EMPIRICAL_WEIGHT = 0.7      // how much a player's actual hit-rate history anchors a rung
+const EMPIRICAL_FULL_SAMPLE = 6   // games of history for full empirical weight (scaled below)
+
+/**
+ * Blend the model's tail probability with how often the player has ACTUALLY
+ * cleared this rung. Captures boom-or-bust ceilings a thin form curve misses
+ * (e.g. a key forward who averages 2 goals but kicks 3+ a third of the time).
+ * Empirical weight scales with sample size so early-season noise is dampened.
+ */
+function blendEmpirical(modelProb: number, gameValues: number[], threshold: number): number {
+  const n = gameValues.length
+  if (n < 3) return modelProb // too few games to trust the history
+  const hits = gameValues.reduce((c, v) => c + (v >= threshold ? 1 : 0), 0)
+  const empProb = hits / n
+  const weight = EMPIRICAL_WEIGHT * Math.min(1, n / EMPIRICAL_FULL_SAMPLE)
+  return weight * empProb + (1 - weight) * modelProb
+}
 
 /**
  * Nudge a projection toward a player's recent form. If the last 3 games run
@@ -182,6 +199,7 @@ export class MultiPropsModel {
     stds: Record<string, number>
     recent: Record<string, number>
     season: Record<string, number>
+    gameValues: Record<string, number[]>
   }>> {
     // Roster = players who took the field in the team's most recent ingested match.
     // Weighted means (recent games heavier) + sample stddev per stat over the form window.
@@ -231,7 +249,13 @@ export class MultiPropsModel {
               AVG(rec.marks)::float      as "snMarks",
               AVG(rec.tackles)::float    as "snTackles",
               AVG(rec.clearances)::float as "snClearances",
-              AVG(rec.hitouts)::float    as "snHitouts"
+              AVG(rec.hitouts)::float    as "snHitouts",
+              array_agg(rec.disposals)  as "gvDisposals",
+              array_agg(rec.goals)      as "gvGoals",
+              array_agg(rec.marks)      as "gvMarks",
+              array_agg(rec.tackles)    as "gvTackles",
+              array_agg(rec.clearances) as "gvClearances",
+              array_agg(rec.hitouts)    as "gvHitouts"
        FROM roster r
        LEFT JOIN multi_players d ON d.player_id = r.player_id
        JOIN recent rec ON rec.player_id = r.player_id
@@ -275,6 +299,14 @@ export class MultiPropsModel {
         clearances: Number(r.snClearances ?? r.mClearances ?? 0),
         hitouts: Number(r.snHitouts ?? r.mHitouts ?? 0),
       },
+      gameValues: {
+        disposals: (r.gvDisposals ?? []).map(Number),
+        goals: (r.gvGoals ?? []).map(Number),
+        marks: (r.gvMarks ?? []).map(Number),
+        tackles: (r.gvTackles ?? []).map(Number),
+        clearances: (r.gvClearances ?? []).map(Number),
+        hitouts: (r.gvHitouts ?? []).map(Number),
+      },
     }))
   }
 
@@ -317,6 +349,7 @@ export class MultiPropsModel {
         stds: Record<string, number>
         recent: Record<string, number>
         season: Record<string, number>
+        gameValues: Record<string, number[]>
       }): PlayerPropMarket => {
         const rungs: PlayerMarketRung[] = []
         for (const [stat, ladder] of Object.entries(STAT_LADDERS)) {
@@ -324,11 +357,14 @@ export class MultiPropsModel {
           // Form mean → momentum-adjusted toward recent-3 vs season → matchup chips
           const formMean = momentumAdjust(p.means[stat] || 0, p.recent[stat] ?? 0, p.season[stat] ?? 0)
           const mean = formMean * concession * (stat === 'goals' ? goalWinFactor : 1)
+          const history = p.gameValues[stat] ?? []
           for (const threshold of ladder) {
             // Goals are a Poisson count; the rest use a normal tail on the form window
-            const prob = stat === 'goals'
+            const modelProb = stat === 'goals'
               ? tailProbPoisson(mean, threshold)
               : tailProbNormal(mean, p.stds[stat] ?? 0, threshold)
+            // Anchor to how often they've actually cleared this rung (controls spread)
+            const prob = blendEmpirical(modelProb, history, threshold)
             const priced = propOdds(prob)
             if (priced) rungs.push({ stat, threshold, odds: priced.odds, prob: priced.prob })
           }
