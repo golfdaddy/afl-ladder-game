@@ -8,6 +8,7 @@ import { runMigrations } from './migrations/run';
 import { syncLadderFromSquiggle } from './jobs/ladderSync';
 import { runFantasySyncJobs } from './jobs/fantasySync';
 import { runMultiJobs } from './jobs/multiJobs';
+import { runSevensJobs } from './jobs/sevensJobs';
 
 dotenv.config();
 
@@ -45,6 +46,7 @@ import adminRoutes from './routes/admin';
 import seasonsRoutes from './routes/seasons';
 import fantasyRoutes from './routes/fantasy';
 import multiRoutes from './routes/multi';
+import sevensRoutes from './routes/sevens';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/predictions', predictionsRoutes);
@@ -54,6 +56,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/seasons', seasonsRoutes);
 app.use('/api/fantasy', fantasyRoutes);
 app.use('/api/multi', multiRoutes);
+app.use('/api/sevens', sevensRoutes);
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -88,6 +91,11 @@ db.connect()
         runMultiJobs()
       }, { timezone: APP_TIMEZONE })
       console.log(`[Multi] Scheduled: settlement, top-up, odds board + comp payouts every 10 minutes in ${APP_TIMEZONE}`)
+
+      cron.schedule('*/15 * * * *', () => {
+        runSevensJobs()
+      }, { timezone: APP_TIMEZONE })
+      console.log(`[Sevens] Scheduled: round scoring every 15 minutes in ${APP_TIMEZONE}`)
     } else {
       console.log(`[Scheduler] Cron jobs disabled in ${NODE_ENV} environment`);
     }

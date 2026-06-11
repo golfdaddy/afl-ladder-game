@@ -26,7 +26,10 @@ import FantasyInviteAcceptPage from './pages/FantasyInviteAcceptPage'
 import SettingsPage from './pages/SettingsPage'
 import MultiPage from './pages/MultiPage'
 import MultiAuthPage from './pages/MultiAuthPage'
-import { FEATURE_FANTASY7_ENABLED, MULTI_ONLY } from './config'
+import SevensPage from './pages/SevensPage'
+import SevensAuthPage from './pages/SevensAuthPage'
+import { applySevensChrome } from './components/SevensBrand'
+import { FEATURE_FANTASY7_ENABLED, MULTI_ONLY, SEVENS_ONLY } from './config'
 
 const queryClient = new QueryClient()
 
@@ -77,7 +80,43 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+/**
+ * Super Sevens is deployed as its own app on its own domain.
+ * No ladder or Freakbet routes — its own branded shell.
+ */
+function SevensApp() {
+  useEffect(() => {
+    applySevensChrome()
+  }, [])
+  return (
+    <Routes>
+      <Route path="/welcome" element={<SevensAuthPage />} />
+      <Route
+        path="/"
+        element={
+          <MultiProtectedRoute>
+            <SevensPage />
+          </MultiProtectedRoute>
+        }
+      />
+      <Route path="*" element={<Navigate to="/" />} />
+    </Routes>
+  )
+}
+
 function App() {
+  if (SEVENS_ONLY) {
+    return (
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <SevensApp />
+          </BrowserRouter>
+        </QueryClientProvider>
+      </ErrorBoundary>
+    )
+  }
+
   if (MULTI_ONLY) {
     return (
       <ErrorBoundary>

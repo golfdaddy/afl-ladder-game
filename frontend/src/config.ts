@@ -44,3 +44,6 @@ export const FEATURE_FANTASY7_ENABLED = import.meta.env.VITE_FEATURE_FANTASY7_EN
 // The ladder build contains no Multi routes at all — the two products must
 // never be visibly associated.
 export const MULTI_ONLY = import.meta.env.VITE_MULTI_ONLY === 'true'
+
+// SEVENS_ONLY builds serve ONLY the Super Sevens app on its own domain.
+export const SEVENS_ONLY = import.meta.env.VITE_SEVENS_ONLY === 'true'
