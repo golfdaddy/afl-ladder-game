@@ -19,6 +19,7 @@ router.get('/comps', asyncHandler(MultiController.myComps))
 router.get('/comps/:compId/leaderboard', asyncHandler(MultiController.compLeaderboard))
 router.post('/bets', asyncHandler(MultiController.placeBet))
 router.get('/bets', asyncHandler(MultiController.getMyBets))
+router.get('/bets/live', asyncHandler(MultiController.getLiveProgress))
 router.get('/leaderboard', asyncHandler(MultiController.getLeaderboard))
 
 export default router

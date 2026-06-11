@@ -106,6 +106,14 @@ export class MultiController {
     res.json({ bets })
   }
 
+  static async getLiveProgress(req: AuthRequest, res: Response) {
+    if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+    const season = await requireSeason(res)
+    if (!season) return
+    const progress = await MultiModel.getLiveBetProgress(req.userId, season.id, season.year)
+    res.json(progress)
+  }
+
   static async getLeaderboard(req: AuthRequest, res: Response) {
     const season = await requireSeason(res)
     if (!season) return

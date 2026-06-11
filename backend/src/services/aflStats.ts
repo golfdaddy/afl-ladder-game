@@ -30,10 +30,17 @@ const AFL_TO_INTERNAL: Record<string, string> = {
 export interface AflMatch {
   providerId: string
   round: number
-  status: string // SCHEDULED | CONCLUDED | LIVE etc.
+  status: string // SCHEDULED | UNCONFIRMED_TEAMS | LIVE | CONCLUDED etc.
   homeTeam: string // internal name
   awayTeam: string // internal name
   utcStartTime: string
+  homeScore: number | null
+  awayScore: number | null
+}
+
+/** True when the match has stats worth reading (in progress or done). */
+export function isMatchUnderway(status: string): boolean {
+  return status === 'LIVE' || status === 'CONCLUDED'
 }
 
 export interface AflPlayerGameStats {
@@ -132,10 +139,13 @@ export class AflStatsService {
     return season.id
   }
 
-  /** All matches for the season (10-minute cache). */
-  static async fetchMatches(year: number): Promise<AflMatch[]> {
+  /**
+   * All matches for the season. 10-minute cache by default; pass fresh=true
+   * to bypass it (live tracking needs current scores).
+   */
+  static async fetchMatches(year: number, fresh = false): Promise<AflMatch[]> {
     const now = Date.now()
-    if (this.matchesCache && this.matchesCache.year === year && now - this.matchesCache.fetchedAt < 10 * 60 * 1000) {
+    if (!fresh && this.matchesCache && this.matchesCache.year === year && now - this.matchesCache.fetchedAt < 10 * 60 * 1000) {
       return this.matchesCache.matches
     }
     const compSeasonId = await this.getCompSeasonId(year)
@@ -152,6 +162,8 @@ export class AflStatsService {
         homeTeam: AFL_TO_INTERNAL[m.home.team.name] || m.home.team.name,
         awayTeam: AFL_TO_INTERNAL[m.away.team.name] || m.away.team.name,
         utcStartTime: m.utcStartTime,
+        homeScore: m.home?.score?.totalScore ?? null,
+        awayScore: m.away?.score?.totalScore ?? null,
       }))
     this.matchesCache = { year, fetchedAt: now, matches }
     return matches

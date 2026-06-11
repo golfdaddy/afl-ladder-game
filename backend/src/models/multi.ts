@@ -409,6 +409,74 @@ export class MultiModel {
     }))
   }
 
+  /**
+   * Live progress for the user's pending-bet legs. Reads in-progress player
+   * stats and scores from the AFL API for any match that's underway.
+   */
+  static async getLiveBetProgress(userId: number, seasonId: number, year: number) {
+    const pendingLegs = await db.query(
+      `SELECT l.id, l.bet_id as "betId", l.game_id as "gameId", l.market, l.selection, l.opponent,
+              l.player_id as "playerId", l.player_name as "playerName", l.stat, l.stat_line as "statLine",
+              l.status, l.provider_match_id as "providerMatchId"
+       FROM multi_bet_legs l
+       JOIN multi_bets b ON l.bet_id = b.id
+       JOIN multi_accounts a ON b.account_id = a.id
+       WHERE b.status = 'pending' AND a.user_id = $1 AND a.season_id = $2`,
+      [userId, seasonId]
+    )
+    if (pendingLegs.rows.length === 0) return { legs: [], anyLive: false }
+
+    // Fresh match list (scores + status), then live stats per underway match
+    const matches = await SquiggleService.fetchAllUpcomingRounds(year).catch(() => [])
+    const squiggleById = new Map<number, { hteamName: string; ateamName: string }>()
+    for (const r of matches) for (const g of r.games) squiggleById.set(g.id, g)
+
+    const { AflStatsService, isMatchUnderway } = await import('../services/aflStats')
+    const aflMatches = await AflStatsService.fetchMatches(year, true)
+    const aflByProvider = new Map(aflMatches.map(m => [m.providerId, m]))
+
+    const providerIds = [...new Set(pendingLegs.rows.filter((l: any) => l.providerMatchId).map((l: any) => l.providerMatchId as string))]
+    const statsByMatch = new Map<string, Map<string, Record<string, number>>>()
+    let anyLive = false
+
+    await Promise.all(providerIds.map(async (pid) => {
+      const match = aflByProvider.get(pid)
+      if (!match || !isMatchUnderway(match.status)) return
+      if (match.status === 'LIVE') anyLive = true
+      try {
+        const stats = await AflStatsService.fetchMatchPlayerStats(pid, match.homeTeam, match.awayTeam)
+        const byPlayer = new Map<string, Record<string, number>>()
+        for (const s of stats) byPlayer.set(s.playerId, s as any)
+        statsByMatch.set(pid, byPlayer)
+      } catch { /* leg stays pending-no-data */ }
+    }))
+
+    const legs = pendingLegs.rows.map((leg: any) => {
+      const match = leg.providerMatchId ? aflByProvider.get(leg.providerMatchId) : null
+      const status = match?.status || 'SCHEDULED'
+      const base = {
+        legId: leg.id, betId: leg.betId, market: leg.market, selection: leg.selection,
+        playerName: leg.playerName, stat: leg.stat, target: leg.statLine == null ? null : num(leg.statLine),
+        matchStatus: status, settledStatus: leg.status,
+      }
+
+      if (leg.market === 'h2h') {
+        const homeIsSelection = match ? leg.selection === match.homeTeam : false
+        const selScore = match ? (homeIsSelection ? match.homeScore : match.awayScore) : null
+        const oppScore = match ? (homeIsSelection ? match.awayScore : match.homeScore) : null
+        return { ...base, current: selScore, opponentScore: oppScore, leading: selScore != null && oppScore != null ? selScore > oppScore : null }
+      }
+
+      // stat_plus
+      const current = leg.providerMatchId ? statsByMatch.get(leg.providerMatchId)?.get(leg.playerId)?.[leg.stat] ?? null : null
+      const target = num(leg.statLine)
+      const hit = current != null && current >= target
+      return { ...base, current, hit }
+    })
+
+    return { legs, anyLive }
+  }
+
   static async getLeaderboard(seasonId: number) {
     const result = await db.query(
       `SELECT a.user_id as "userId", u.display_name as "displayName", a.balance,
