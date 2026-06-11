@@ -240,13 +240,23 @@ export default function SevensPage() {
               </button>
             ))}
           </div>
-          <p className="text-xs text-slate-400 flex items-center gap-1 flex-wrap">Pick 2 defenders, 2 mids, 1 ruck, 2 forwards. <FreakCoin size={12} />{budget} Freakazoids — the elite cost <FreakCoin size={11} />10, fringe players <FreakCoin size={11} />1.</p>
+          <p className="text-xs text-slate-400">Round {round?.round ?? ''} — build your seven and lock it in.</p>
         </div>
 
         {/* ── TEAM BUILDER ── */}
         {view === 'team' && (
           <div className="flex flex-col lg:flex-row gap-5 items-start">
             <div className="flex-1 w-full">
+              {/* Welcome / how it works */}
+              <div className="mb-3 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white p-4">
+                <p className="text-base font-black tracking-tight mb-1.5">Welcome to Super Sevens 🏉</p>
+                <ul className="space-y-1 text-[13px] text-emerald-50/90">
+                  <li className="flex items-center gap-1.5"><FreakCoin size={14} /> <span><span className="font-bold text-white">{budget} Freakazoid</span> budget to spend</span></li>
+                  <li>• Pick a team of <span className="font-bold text-white">seven</span> — 2 defenders, 2 mids, 1 ruck, 2 forwards</li>
+                  <li>• The elite cost Ƒ10, fringe players Ƒ1 — spend it how you like</li>
+                  <li>• <span className="font-bold text-white">Highest fantasy score wins the week</span></li>
+                </ul>
+              </div>
               {locked && (
                 <div className="mb-3 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-800">
                   Round {round?.round} is locked — teams are final. {round?.status === 'scored' ? 'Scores are in.' : 'Games are underway.'}
