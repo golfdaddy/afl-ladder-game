@@ -6,9 +6,31 @@ import { SquiggleService } from '../services/squiggle'
 
 export const FORMATION: Record<string, number> = { BACK: 2, MID: 2, RUCK: 1, FWD: 2 }
 export const TEAM_SIZE = 7
-export const DEFAULT_BUDGET = 25 // $ for 7 players — forces star-vs-spread choices
-export const PRICE_TIERS = 7     // each position split into 7 price buckets ($7…$1)
+export const DEFAULT_BUDGET = 40 // Ƒ for 7 players — forces star-vs-spread choices
+export const MAX_PRICE = 10
 const MIN_GAMES = 4              // games of form needed to be priced into the pool
+
+// Price by standing within position (steep at the top so elite is exclusive,
+// fat middle, cheap fringe). [cumulative top fraction, price]. A player at
+// percentile-from-top p gets the first band whose cutoff exceeds p.
+const PRICE_BANDS: Array<[number, number]> = [
+  [0.04, 10], // genuine guns only (~top 4%)
+  [0.09, 9],
+  [0.16, 8],
+  [0.26, 7],
+  [0.40, 6],
+  [0.55, 5],
+  [0.70, 4],
+  [0.83, 3],
+  [0.93, 2],
+  [1.01, 1],
+]
+
+function priceForRank(rank: number, n: number): number {
+  const pct = n > 0 ? rank / n : 1 // 0 = best in position
+  for (const [cutoff, price] of PRICE_BANDS) if (pct < cutoff) return price
+  return 1
+}
 
 // Listed AFL position → Super Sevens slot eligibility
 const POSITION_MAP: Record<string, string[]> = {
@@ -109,9 +131,11 @@ export class SevensModel {
   }
 
   /**
-   * Build the priced player pool. Each position group is split into 7 price
-   * tiers by fantasy average: the top septile of defenders costs $7, the next
-   * $6, down to $1 — so price reflects standing within position, not raw output.
+   * Build the priced player pool. Within each position, players are ranked by
+   * fantasy average and priced on a steep 1–10 curve: only the top ~4% are Ƒ10,
+   * so the elite are exclusive and there's gradation among the guns rather than
+   * a flat top bucket. Pricing is per-position, so positional scarcity is built
+   * in (the best ruck and best forward are both Ƒ10 despite different output).
    */
   static async generatePool(sevensRoundId: number, year: number): Promise<number> {
     const rows = await db.query(
@@ -146,8 +170,7 @@ export class SevensModel {
       const players = byGroup[group].sort((a, b) => b.avgPoints - a.avgPoints)
       const n = players.length
       for (let rank = 0; rank < n; rank++) {
-        // Septile → tier 7 (best) down to 1 (worst)
-        const tier = Math.min(PRICE_TIERS, Math.max(1, PRICE_TIERS - Math.floor((rank * PRICE_TIERS) / n)))
+        const tier = priceForRank(rank, n) // steep 1–10 curve, exclusive at the top
         const p = players[rank]
         await db.query(
           `INSERT INTO sevens_player_pool (sevens_round_id, player_id, player_name, team_internal, positions, avg_points, price)

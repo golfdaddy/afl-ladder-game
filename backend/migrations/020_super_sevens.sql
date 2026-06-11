@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS sevens_rounds (
   id SERIAL PRIMARY KEY,
   season_id INT NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
   round INT NOT NULL,
-  budget INT NOT NULL DEFAULT 25,
+  budget INT NOT NULL DEFAULT 40,
   status VARCHAR(12) NOT NULL DEFAULT 'open', -- open | locked | scored
   locks_at TIMESTAMP,                          -- first game bounce of the round
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
