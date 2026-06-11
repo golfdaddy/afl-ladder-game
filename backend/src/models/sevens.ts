@@ -75,8 +75,10 @@ export interface PoolPlayer {
   playerName: string
   team: string
   positions: string[]
-  avgPoints: number
+  avgPoints: number   // season average (sets the price)
   price: number
+  last5: number[]     // most recent 5 fantasy scores, oldest→newest (form, display only)
+  last5Avg: number    // average of those 5
 }
 
 export class SevensModel {
@@ -184,15 +186,33 @@ export class SevensModel {
     return inserted
   }
 
-  static async getPool(sevensRoundId: number): Promise<PoolPlayer[]> {
+  static async getPool(sevensRoundId: number, year: number): Promise<PoolPlayer[]> {
+    // Form (last 5 scores) computed fresh so it tracks the live season,
+    // even though the price was snapshotted from the season average.
     const result = await db.query(
-      `SELECT player_id as "playerId", player_name as "playerName", team_internal as "team",
-              positions, avg_points as "avgPoints", price
-       FROM sevens_player_pool WHERE sevens_round_id = $1
-       ORDER BY price DESC, player_name ASC`,
-      [sevensRoundId]
+      `SELECT pp.player_id as "playerId", pp.player_name as "playerName", pp.team_internal as "team",
+              pp.positions, pp.avg_points as "avgPoints", pp.price,
+              COALESCE(f.last5, '{}') as "last5", f.last5avg as "last5Avg"
+       FROM sevens_player_pool pp
+       LEFT JOIN LATERAL (
+         SELECT array_agg(pts ORDER BY round ASC) as last5, ROUND(AVG(pts), 1) as last5avg
+         FROM (
+           SELECT dream_team_points pts, round FROM multi_player_stats
+           WHERE player_id = pp.player_id AND season_year = $2
+           ORDER BY round DESC LIMIT 5
+         ) recent
+       ) f ON true
+       WHERE pp.sevens_round_id = $1
+       ORDER BY pp.price DESC, pp.player_name ASC`,
+      [sevensRoundId, year]
     )
-    return result.rows.map((r: any) => ({ ...r, avgPoints: num(r.avgPoints), price: num(r.price) }))
+    return result.rows.map((r: any) => ({
+      ...r,
+      avgPoints: num(r.avgPoints),
+      price: num(r.price),
+      last5: (r.last5 || []).map((v: any) => Math.round(num(v))),
+      last5Avg: r.last5Avg == null ? num(r.avgPoints) : num(r.last5Avg),
+    }))
   }
 
   /**

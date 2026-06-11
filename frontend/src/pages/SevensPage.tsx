@@ -14,6 +14,29 @@ interface PoolPlayer {
   positions: string[]
   avgPoints: number
   price: number
+  last5: number[]
+  last5Avg: number
+}
+
+/** Season avg + last-5 avg (form, green if hot / red if cold) + the 5 scores. */
+function FormBits({ player }: { player: PoolPlayer }) {
+  const hot = player.last5Avg - player.avgPoints
+  const trend = Math.abs(hot) < 2 ? 'flat' : hot > 0 ? 'up' : 'down'
+  return (
+    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+      <span className="text-[10px] text-slate-400">Avg <span className="font-bold text-slate-600">{player.avgPoints}</span></span>
+      <span className={`text-[10px] font-bold ${trend === 'up' ? 'text-emerald-600' : trend === 'down' ? 'text-red-500' : 'text-slate-400'}`}>
+        L5 {player.last5Avg}{trend === 'up' ? ' ▲' : trend === 'down' ? ' ▼' : ''}
+      </span>
+      {player.last5.length > 0 && (
+        <span className="flex items-center gap-0.5">
+          {player.last5.map((s, i) => (
+            <span key={i} className="text-[9px] font-semibold text-slate-500 bg-slate-100 rounded px-1 py-0.5 tabular-nums">{s}</span>
+          ))}
+        </span>
+      )}
+    </div>
+  )
 }
 
 interface TeamPlayer extends PoolPlayer {
@@ -195,11 +218,11 @@ export default function SevensPage() {
                         <>
                           <PlayerChip team={player.team} />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-slate-900 truncate">{player.playerName}</p>
-                            <p className="text-[10px] text-slate-400">{SLOT_LABELS[slot]} · avg {player.avgPoints}{locked && tp?.points != null ? ` · scored ${tp.points}` : ''}</p>
+                            <p className="text-sm font-bold text-slate-900 truncate">{player.playerName} <span className="text-[10px] font-semibold text-slate-400">{SLOT_LABELS[slot]}</span>{locked && tp?.points != null ? <span className="ml-1 text-[10px] font-black text-emerald-600">scored {tp.points}</span> : null}</p>
+                            <FormBits player={player} />
                           </div>
-                          <span className="text-sm font-black text-emerald-600 flex-shrink-0">{FREAK_SYMBOL}{player.price}</span>
-                          {!locked && <span onClick={(e) => { e.stopPropagation(); clearSlot(i) }} className="text-slate-300 hover:text-red-400 font-bold px-1">×</span>}
+                          <span className="text-sm font-black text-emerald-600 flex-shrink-0 self-start">{FREAK_SYMBOL}{player.price}</span>
+                          {!locked && <span onClick={(e) => { e.stopPropagation(); clearSlot(i) }} className="text-slate-300 hover:text-red-400 font-bold px-1 self-start">×</span>}
                         </>
                       ) : (
                         <span className="flex-1 text-sm text-slate-400">Tap to pick a {SLOT_LABELS[slot].toLowerCase()}</span>
@@ -251,10 +274,10 @@ export default function SevensPage() {
                             className={`w-full flex items-center gap-2 px-3 py-2 text-left ${affordable ? 'hover:bg-emerald-50' : 'opacity-40 cursor-not-allowed'}`}>
                             <PlayerChip team={p.team} />
                             <div className="flex-1 min-w-0">
-                              <p className="text-xs font-semibold text-slate-800 truncate">{p.playerName}</p>
-                              <p className="text-[10px] text-slate-400">avg {p.avgPoints}{p.positions.length > 1 ? ` · ${p.positions.join('/')}` : ''}</p>
+                              <p className="text-xs font-semibold text-slate-800 truncate">{p.playerName}{p.positions.length > 1 ? <span className="ml-1 text-[9px] font-black text-slate-400">{p.positions.join('/')}</span> : null}</p>
+                              <FormBits player={p} />
                             </div>
-                            <span className="text-sm font-black text-emerald-600">{FREAK_SYMBOL}{p.price}</span>
+                            <span className="text-sm font-black text-emerald-600 flex-shrink-0 self-start">{FREAK_SYMBOL}{p.price}</span>
                           </button>
                         )
                       })}
