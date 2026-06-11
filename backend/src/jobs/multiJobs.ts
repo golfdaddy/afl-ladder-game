@@ -44,6 +44,12 @@ export async function runMultiJobs(): Promise<void> {
       console.log(`[Multi] Player directory refreshed (${upserted} players)`)
     }
 
+    // Recompute the odds board for the nearest round so saved odds track form
+    const rungs = await MultiPropsModel.saveOddsBoard(season.year)
+    if (rungs > 0) {
+      console.log(`[Multi] Odds board saved (${rungs} market rungs)`)
+    }
+
     const settled = await MultiModel.settleBets(season.id, season.year)
     if (settled.legsSettled > 0 || settled.betsSettled > 0) {
       console.log(`[Multi] Settled ${settled.legsSettled} legs, ${settled.betsSettled} bets`)

@@ -1,21 +1,43 @@
 import { db } from '../db'
 import { AflStatsService } from '../services/aflStats'
 import { SquiggleService } from '../services/squiggle'
+import { tailProbNormal, tailProbPoisson, propOdds } from '../utils/multiOdds'
 
-// Pricing knobs
-const DISPOSAL_ODDS = 1.87           // both sides of a x.5 line set at the player's weighted average
-const GOAL_MARGIN = 0.92             // house margin on anytime goal scorer
-const MIN_GOAL_ODDS = 1.1
-const MAX_GOAL_ODDS = 12
-const FORM_GAMES = 5                 // games in the weighted average, most recent weighted highest
+const FORM_GAMES = 5 // games in the weighted form window, most recent weighted highest
+
+// Sportsbet-style threshold ladders per stat
+export const STAT_LADDERS: Record<string, number[]> = {
+  disposals: [15, 20, 25, 30, 35],
+  goals: [1, 2, 3, 4, 5],
+  marks: [4, 6, 8, 10],
+  tackles: [4, 6, 8],
+  clearances: [4, 6, 8, 10],
+  hitouts: [20, 30, 40],
+}
+
+export const STAT_LABELS: Record<string, string> = {
+  disposals: 'Disposals',
+  goals: 'Goals',
+  marks: 'Marks',
+  tackles: 'Tackles',
+  clearances: 'Clearances',
+  hitouts: 'Hitouts',
+}
+
+export interface PlayerMarketRung {
+  stat: string
+  threshold: number
+  odds: number
+  prob: number
+}
 
 export interface PlayerPropMarket {
   playerId: string
   playerName: string
   team: string
   listedPosition: string | null
-  disposals: { line: number; overOdds: number; underOdds: number; avg: number } | null
-  anytimeGoal: { odds: number; avg: number } | null
+  avgs: Record<string, number>
+  rungs: PlayerMarketRung[]
 }
 
 export interface GameProps {
@@ -77,11 +99,12 @@ export class MultiPropsModel {
     playerId: string
     playerName: string
     listedPosition: string | null
-    avgDisposals: number
-    avgGoals: number
     games: number
+    means: Record<string, number>
+    stds: Record<string, number>
   }>> {
-    // Roster = players who took the field in the team's most recent ingested match
+    // Roster = players who took the field in the team's most recent ingested match.
+    // Weighted means (recent games heavier) + sample stddev per stat over the form window.
     const result = await db.query(
       `WITH latest AS (
          SELECT provider_match_id FROM multi_player_stats
@@ -95,7 +118,7 @@ export class MultiPropsModel {
          WHERE s.team_internal = $2
        ),
        recent AS (
-         SELECT s.player_id, s.disposals, s.goals,
+         SELECT s.player_id, s.disposals, s.goals, s.marks, s.tackles, s.clearances, s.hitouts,
                 ROW_NUMBER() OVER (PARTITION BY s.player_id ORDER BY s.round DESC) AS rn
          FROM multi_player_stats s
          JOIN roster r ON r.player_id = s.player_id
@@ -103,20 +126,45 @@ export class MultiPropsModel {
        )
        SELECT r.player_id as "playerId", r.player_name as "playerName",
               d.listed_position as "listedPosition",
-              SUM(rec.disposals * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "avgDisposals",
-              SUM(rec.goals * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "avgGoals",
-              COUNT(rec.player_id)::int as games
+              COUNT(rec.player_id)::int as games,
+              SUM(rec.disposals  * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "mDisposals",
+              SUM(rec.goals      * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "mGoals",
+              SUM(rec.marks      * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "mMarks",
+              SUM(rec.tackles    * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "mTackles",
+              SUM(rec.clearances * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "mClearances",
+              SUM(rec.hitouts    * ($3 + 1 - rec.rn))::float / NULLIF(SUM($3 + 1 - rec.rn), 0) as "mHitouts",
+              COALESCE(STDDEV_SAMP(rec.disposals), 0)::float as "sDisposals",
+              COALESCE(STDDEV_SAMP(rec.marks), 0)::float as "sMarks",
+              COALESCE(STDDEV_SAMP(rec.tackles), 0)::float as "sTackles",
+              COALESCE(STDDEV_SAMP(rec.clearances), 0)::float as "sClearances",
+              COALESCE(STDDEV_SAMP(rec.hitouts), 0)::float as "sHitouts"
        FROM roster r
        LEFT JOIN multi_players d ON d.player_id = r.player_id
        JOIN recent rec ON rec.player_id = r.player_id AND rec.rn <= $3
        GROUP BY r.player_id, r.player_name, d.listed_position
-       ORDER BY "avgDisposals" DESC`,
+       ORDER BY "mDisposals" DESC`,
       [year, teamInternal, FORM_GAMES]
     )
     return result.rows.map((r: any) => ({
-      ...r,
-      avgDisposals: Number(r.avgDisposals || 0),
-      avgGoals: Number(r.avgGoals || 0),
+      playerId: r.playerId,
+      playerName: r.playerName,
+      listedPosition: r.listedPosition,
+      games: r.games,
+      means: {
+        disposals: Number(r.mDisposals || 0),
+        goals: Number(r.mGoals || 0),
+        marks: Number(r.mMarks || 0),
+        tackles: Number(r.mTackles || 0),
+        clearances: Number(r.mClearances || 0),
+        hitouts: Number(r.mHitouts || 0),
+      },
+      stds: {
+        disposals: Number(r.sDisposals || 0),
+        marks: Number(r.sMarks || 0),
+        tackles: Number(r.sTackles || 0),
+        clearances: Number(r.sClearances || 0),
+        hitouts: Number(r.sHitouts || 0),
+      },
     }))
   }
 
@@ -141,24 +189,34 @@ export class MultiPropsModel {
       this.teamPlayerForm(year, game.ateamName),
     ])
 
-    const toMarket = (team: string) => (p: { playerId: string; playerName: string; listedPosition: string | null; avgDisposals: number; avgGoals: number; games: number }): PlayerPropMarket => {
-      // Disposal line sits on the .5 nearest the weighted average; both sides priced evenly
-      const disposals = p.avgDisposals >= 8
-        ? { line: Math.floor(p.avgDisposals) + 0.5, overOdds: DISPOSAL_ODDS, underOdds: DISPOSAL_ODDS, avg: round2(p.avgDisposals) }
-        : null
-      // Anytime goal from a Poisson rate on weighted goals-per-game
-      const lambda = p.avgGoals
-      const pGoal = 1 - Math.exp(-lambda)
-      const anytimeGoal = lambda >= 0.15
-        ? { odds: Math.min(MAX_GOAL_ODDS, Math.max(MIN_GOAL_ODDS, round2((1 / pGoal) * GOAL_MARGIN))), avg: round2(lambda) }
-        : null
-      return { playerId: p.playerId, playerName: p.playerName, team, listedPosition: p.listedPosition, disposals, anytimeGoal }
+    const toMarket = (team: string) => (p: {
+      playerId: string
+      playerName: string
+      listedPosition: string | null
+      games: number
+      means: Record<string, number>
+      stds: Record<string, number>
+    }): PlayerPropMarket => {
+      const rungs: PlayerMarketRung[] = []
+      for (const [stat, ladder] of Object.entries(STAT_LADDERS)) {
+        for (const threshold of ladder) {
+          // Goals are a Poisson count; the rest use a normal tail on the form window
+          const prob = stat === 'goals'
+            ? tailProbPoisson(p.means.goals, threshold)
+            : tailProbNormal(p.means[stat], p.stds[stat] ?? 0, threshold)
+          const priced = propOdds(prob)
+          if (priced) rungs.push({ stat, threshold, odds: priced.odds, prob: priced.prob })
+        }
+      }
+      const avgs: Record<string, number> = {}
+      for (const stat of Object.keys(STAT_LADDERS)) avgs[stat] = round2(p.means[stat] || 0)
+      return { playerId: p.playerId, playerName: p.playerName, team, listedPosition: p.listedPosition, avgs, rungs }
     }
 
     const players = [
       ...homeForm.map(toMarket(game.hteamName)),
       ...awayForm.map(toMarket(game.ateamName)),
-    ].filter(p => p.disposals || p.anytimeGoal)
+    ].filter(p => p.rungs.length > 0)
 
     return {
       gameId: game.id,
@@ -235,6 +293,36 @@ export class MultiPropsModel {
       [year, teamInternal || null]
     )
     return result.rows
+  }
+
+  /**
+   * Compute and persist the odds board for every game in the nearest upcoming
+   * round. The saved board is the queryable record of "what we'd offer now".
+   */
+  static async saveOddsBoard(year: number): Promise<number> {
+    const rounds = await SquiggleService.fetchAllUpcomingRounds(year)
+    if (rounds.length === 0) return 0
+    const nearest = rounds[0]
+
+    let saved = 0
+    for (const game of nearest.games) {
+      const props = await this.getGameProps(year, { id: game.id, round: game.round, hteamName: game.hteamName, ateamName: game.ateamName })
+      if (!props) continue
+      for (const player of props.players) {
+        for (const rung of player.rungs) {
+          await db.query(
+            `INSERT INTO multi_player_odds
+               (provider_match_id, game_id, season_year, round, player_id, player_name, team_internal, stat, threshold, odds, implied_prob, computed_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+             ON CONFLICT (provider_match_id, player_id, stat, threshold)
+             DO UPDATE SET odds = EXCLUDED.odds, implied_prob = EXCLUDED.implied_prob, computed_at = NOW()`,
+            [props.providerMatchId, game.id, year, game.round, player.playerId, player.playerName, player.team, rung.stat, rung.threshold, rung.odds, rung.prob]
+          )
+          saved++
+        }
+      }
+    }
+    return saved
   }
 
   /** Convenience: props for a Squiggle game id. */

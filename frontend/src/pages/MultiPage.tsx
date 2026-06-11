@@ -25,7 +25,7 @@ interface MarketRound {
   games: MarketGame[]
 }
 
-type LegMarket = 'h2h' | 'disposals_ou' | 'anytime_goal'
+type LegMarket = 'h2h' | 'stat_plus'
 
 interface SlipLeg {
   key: string
@@ -37,7 +37,14 @@ interface SlipLeg {
   chipTeam: string // team whose colours to show
   selection?: string // h2h team
   playerId?: string
-  side?: 'over' | 'under'
+  stat?: string
+  threshold?: number
+}
+
+interface PropRung {
+  stat: string
+  threshold: number
+  odds: number
 }
 
 interface PropPlayer {
@@ -45,8 +52,8 @@ interface PropPlayer {
   playerName: string
   team: string
   listedPosition: string | null
-  disposals: { line: number; overOdds: number; underOdds: number; avg: number } | null
-  anytimeGoal: { odds: number; avg: number } | null
+  avgs: Record<string, number>
+  rungs: PropRung[]
 }
 
 const POSITION_LABELS: Record<string, string> = {
@@ -57,6 +64,24 @@ const POSITION_LABELS: Record<string, string> = {
   MEDIUM_DEFENDER: 'DEF',
   KEY_DEFENDER: 'KEY DEF',
   RUCK: 'RUCK',
+}
+
+const STAT_TABS: Array<{ key: string; label: string }> = [
+  { key: 'disposals', label: 'Disposals' },
+  { key: 'goals', label: 'Goals' },
+  { key: 'marks', label: 'Marks' },
+  { key: 'tackles', label: 'Tackles' },
+  { key: 'clearances', label: 'Clearances' },
+  { key: 'hitouts', label: 'Hitouts' },
+]
+
+const STAT_SHORT: Record<string, string> = {
+  disposals: 'disposals',
+  goals: 'goals',
+  marks: 'marks',
+  tackles: 'tackles',
+  clearances: 'clearances',
+  hitouts: 'hitouts',
 }
 
 interface GamePropsData {
@@ -139,6 +164,7 @@ export default function MultiPage() {
   const [placeSuccess, setPlaceSuccess] = useState('')
   const [propsGameId, setPropsGameId] = useState<number | null>(null)
   const [propsSearch, setPropsSearch] = useState('')
+  const [propsTab, setPropsTab] = useState('disposals')
 
   const { data: accountData } = useQuery({
     queryKey: ['multi', 'account'],
@@ -183,13 +209,19 @@ export default function MultiPage() {
 
   // ── Bet slip ───────────────────────────────────────────────────────────────
 
-  // Combined odds with the same SGM haircut the server applies (0.9 per extra same-game leg)
+  // Combined odds with the same SGM haircuts the server applies:
+  // 0.9 per extra same-game leg, tightened to 0.8 for extra legs on one player
   const slipOdds = useMemo(() => {
     const raw = slip.reduce((acc, l) => acc * l.odds, 1)
     const perGame = new Map<number, number>()
-    for (const l of slip) perGame.set(l.gameId, (perGame.get(l.gameId) || 0) + 1)
+    const perPlayer = new Map<string, number>()
+    for (const l of slip) {
+      perGame.set(l.gameId, (perGame.get(l.gameId) || 0) + 1)
+      if (l.playerId) perPlayer.set(l.playerId, (perPlayer.get(l.playerId) || 0) + 1)
+    }
     let factor = 1
     for (const count of perGame.values()) if (count > 1) factor *= Math.pow(0.9, count - 1)
+    for (const count of perPlayer.values()) if (count > 1) factor *= Math.pow(0.8 / 0.9, count - 1)
     return Math.round(raw * factor * 1000) / 1000
   }, [slip])
   const hasSgm = useMemo(() => {
@@ -231,42 +263,32 @@ export default function MultiPage() {
     )
   }
 
-  const toggleDisposals = (game: GamePropsData, player: PropPlayer, side: 'over' | 'under') => {
-    if (!player.disposals) return
+  const toggleRung = (game: GamePropsData, player: PropPlayer, rung: PropRung) => {
+    // One rung per player per stat — picking 25+ replaces 20+ for the same player
+    const replaceKeys = player.rungs
+      .filter(r => r.stat === rung.stat)
+      .map(r => `stat_plus:${game.gameId}:${player.playerId}:${r.stat}:${r.threshold}`)
     toggleLeg(
       {
-        key: `disposals_ou:${game.gameId}:${player.playerId}:${side}`,
+        key: `stat_plus:${game.gameId}:${player.playerId}:${rung.stat}:${rung.threshold}`,
         gameId: game.gameId,
-        market: 'disposals_ou',
-        label: `${player.playerName} ${side === 'over' ? 'O' : 'U'} ${player.disposals.line} disposals`,
+        market: 'stat_plus',
+        label: `${player.playerName} ${rung.threshold}+ ${STAT_SHORT[rung.stat] || rung.stat}`,
         sublabel: `${game.homeTeam} v ${game.awayTeam}`,
-        odds: side === 'over' ? player.disposals.overOdds : player.disposals.underOdds,
+        odds: rung.odds,
         chipTeam: player.team,
         playerId: player.playerId,
-        side,
+        stat: rung.stat,
+        threshold: rung.threshold,
       },
-      [`disposals_ou:${game.gameId}:${player.playerId}:over`, `disposals_ou:${game.gameId}:${player.playerId}:under`]
+      replaceKeys
     )
-  }
-
-  const toggleAnytimeGoal = (game: GamePropsData, player: PropPlayer) => {
-    if (!player.anytimeGoal) return
-    toggleLeg({
-      key: `anytime_goal:${game.gameId}:${player.playerId}`,
-      gameId: game.gameId,
-      market: 'anytime_goal',
-      label: `${player.playerName} anytime goal`,
-      sublabel: `${game.homeTeam} v ${game.awayTeam}`,
-      odds: player.anytimeGoal.odds,
-      chipTeam: player.team,
-      playerId: player.playerId,
-    })
   }
 
   const placeBetMutation = useMutation({
     mutationFn: () => api.post('/multi/bets', {
       stake,
-      legs: slip.map(l => ({ gameId: l.gameId, market: l.market, selection: l.selection, playerId: l.playerId, side: l.side })),
+      legs: slip.map(l => ({ gameId: l.gameId, market: l.market, selection: l.selection, playerId: l.playerId, stat: l.stat, threshold: l.threshold })),
     }),
     onSuccess: (response) => {
       setSlip([])
@@ -417,28 +439,42 @@ export default function MultiPage() {
                                 <div className="px-4 py-6 text-center text-slate-400 text-xs">No player markets for this game yet.</div>
                               ) : (
                                 <>
-                                  <div className="px-4 pt-3 pb-1 flex items-center gap-2">
+                                  {/* Stat tabs + search */}
+                                  <div className="px-4 pt-3 pb-1 space-y-2">
+                                    <div className="flex gap-1 overflow-x-auto">
+                                      {STAT_TABS.map(tab => {
+                                        const hasMarkets = gameProps.players.some(p => p.rungs.some(r => r.stat === tab.key))
+                                        if (!hasMarkets) return null
+                                        return (
+                                          <button
+                                            key={tab.key}
+                                            onClick={() => setPropsTab(tab.key)}
+                                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors ${propsTab === tab.key ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-500 hover:border-slate-300'}`}
+                                          >
+                                            {tab.label}
+                                          </button>
+                                        )
+                                      })}
+                                    </div>
                                     <input
                                       type="text"
                                       placeholder="Search player…"
                                       value={propsSearch}
                                       onChange={e => setPropsSearch(e.target.value)}
-                                      className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
+                                      className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
                                     />
-                                    <span className="text-[10px] text-slate-400">O/U = disposals · AGS = anytime goal</span>
                                   </div>
                                   <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
                                     {gameProps.players
-                                      .filter(p => !propsSearch || p.playerName.toLowerCase().includes(propsSearch.toLowerCase()))
-                                      .map(player => {
-                                        const overKey = `disposals_ou:${game.gameId}:${player.playerId}:over`
-                                        const underKey = `disposals_ou:${game.gameId}:${player.playerId}:under`
-                                        const agsKey = `anytime_goal:${game.gameId}:${player.playerId}`
+                                      .map(p => ({ player: p, rungs: p.rungs.filter(r => r.stat === propsTab) }))
+                                      .filter(({ player, rungs }) => rungs.length > 0 && (!propsSearch || player.playerName.toLowerCase().includes(propsSearch.toLowerCase())))
+                                      .sort((a, b) => (b.player.avgs[propsTab] || 0) - (a.player.avgs[propsTab] || 0))
+                                      .map(({ player, rungs }) => {
                                         const inSlip = (k: string) => slip.some(l => l.key === k)
                                         return (
                                           <div key={player.playerId} className="px-4 py-2 flex items-center gap-2 bg-white">
                                             <TeamChip teamName={player.team} />
-                                            <div className="flex-1 min-w-0">
+                                            <div className="w-32 min-w-0 flex-shrink-0">
                                               <p className="text-xs font-semibold text-slate-800 truncate">
                                                 {player.playerName}
                                                 {player.listedPosition && (
@@ -447,37 +483,22 @@ export default function MultiPage() {
                                                   </span>
                                                 )}
                                               </p>
-                                              <p className="text-[10px] text-slate-400">
-                                                {player.disposals ? `${player.disposals.avg} disp avg` : ''}
-                                                {player.disposals && player.anytimeGoal ? ' · ' : ''}
-                                                {player.anytimeGoal ? `${player.anytimeGoal.avg} gls avg` : ''}
-                                              </p>
+                                              <p className="text-[10px] text-slate-400">{(player.avgs[propsTab] || 0).toFixed(propsTab === 'goals' ? 2 : 1)} avg</p>
                                             </div>
-                                            {player.disposals && (
-                                              <div className="flex items-center gap-1 flex-shrink-0">
-                                                <span className="text-[10px] font-bold text-slate-400 w-8 text-right">{player.disposals.line}</span>
-                                                <button
-                                                  onClick={() => toggleDisposals(gameProps, player, 'over')}
-                                                  className={`px-2 py-1 rounded-lg text-[11px] font-black transition-colors ${inSlip(overKey) ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                                                >
-                                                  O {player.disposals.overOdds.toFixed(2)}
-                                                </button>
-                                                <button
-                                                  onClick={() => toggleDisposals(gameProps, player, 'under')}
-                                                  className={`px-2 py-1 rounded-lg text-[11px] font-black transition-colors ${inSlip(underKey) ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                                                >
-                                                  U {player.disposals.underOdds.toFixed(2)}
-                                                </button>
-                                              </div>
-                                            )}
-                                            {player.anytimeGoal && (
-                                              <button
-                                                onClick={() => toggleAnytimeGoal(gameProps, player)}
-                                                className={`px-2 py-1 rounded-lg text-[11px] font-black flex-shrink-0 transition-colors ${inSlip(agsKey) ? 'bg-violet-600 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
-                                              >
-                                                AGS {player.anytimeGoal.odds.toFixed(2)}
-                                              </button>
-                                            )}
+                                            <div className="flex-1 flex items-center gap-1 flex-wrap justify-end">
+                                              {rungs.map(rung => {
+                                                const key = `stat_plus:${game.gameId}:${player.playerId}:${rung.stat}:${rung.threshold}`
+                                                return (
+                                                  <button
+                                                    key={key}
+                                                    onClick={() => toggleRung(gameProps, player, rung)}
+                                                    className={`px-2 py-1 rounded-lg text-[11px] font-black transition-colors ${inSlip(key) ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                                  >
+                                                    {rung.threshold}+ <span className="font-bold">{rung.odds.toFixed(2)}</span>
+                                                  </button>
+                                                )
+                                              })}
+                                            </div>
                                           </div>
                                         )
                                       })}
