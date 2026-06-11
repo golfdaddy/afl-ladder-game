@@ -96,6 +96,10 @@ db.connect()
         runSevensJobs()
       }, { timezone: APP_TIMEZONE })
       console.log(`[Sevens] Scheduled: round scoring every 15 minutes in ${APP_TIMEZONE}`)
+
+      // Kick the betting/fantasy jobs once on boot so player data backfills
+      // immediately after a deploy rather than waiting for the first cron tick.
+      setTimeout(() => { runMultiJobs(); runSevensJobs(); }, 8000)
     } else {
       console.log(`[Scheduler] Cron jobs disabled in ${NODE_ENV} environment`);
     }
