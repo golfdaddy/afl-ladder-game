@@ -107,6 +107,9 @@ export default function SevensPage() {
   const [search, setSearch] = useState('')
   const [saveMsg, setSaveMsg] = useState('')
   const [initialised, setInitialised] = useState(false)
+  const [posFilter, setPosFilter] = useState<'ALL' | 'BACK' | 'MID' | 'RUCK' | 'FWD'>('ALL')
+  const [priceFilter, setPriceFilter] = useState<number | 'ALL'>('ALL')
+  const [sortBy, setSortBy] = useState<'price' | 'avg' | 'l5'>('price')
 
   const { data: roundData } = useQuery({
     queryKey: ['sevens', 'round'],
@@ -151,14 +154,24 @@ export default function SevensPage() {
 
   const pickedIds = useMemo(() => new Set(picks.filter(Boolean) as string[]), [picks])
 
-  const eligibleForSlot = useMemo(() => {
-    if (activeSlot == null) return []
-    const slot = slots[activeSlot]
+  // Always-on, filterable/sortable player browser
+  const filteredPool = useMemo(() => {
+    const sortVal = (p: PoolPlayer) => sortBy === 'avg' ? p.avgPoints : sortBy === 'l5' ? p.last5Avg : p.price
+    const unselectable = (p: PoolPlayer) => p.locked || p.named === false
     return pool
-      .filter(p => p.positions.includes(slot) && !pickedIds.has(p.playerId))
+      .filter(p => !pickedIds.has(p.playerId))
+      .filter(p => posFilter === 'ALL' || p.positions.includes(posFilter))
+      .filter(p => priceFilter === 'ALL' || p.price === priceFilter)
       .filter(p => !search || p.playerName.toLowerCase().includes(search.toLowerCase()))
-      .sort((a, b) => b.price - a.price)
-  }, [activeSlot, slots, pool, pickedIds, search])
+      .sort((a, b) => {
+        // out/locked sink, then by chosen metric desc, price as tiebreak
+        if (unselectable(a) !== unselectable(b)) return unselectable(a) ? 1 : -1
+        return sortVal(b) - sortVal(a) || b.price - a.price
+      })
+  }, [pool, pickedIds, posFilter, priceFilter, search, sortBy])
+
+  // Price tiers present in the pool, for the price filter
+  const priceTiers = useMemo(() => [...new Set(pool.map(p => p.price))].sort((a, b) => b - a), [pool])
 
   const saveMutation = useMutation({
     mutationFn: () => api.post('/sevens/team', {
@@ -171,11 +184,24 @@ export default function SevensPage() {
     onError: (err: any) => setSaveMsg(err.response?.data?.error || 'Failed to save team'),
   })
 
-  const assignPlayer = (playerId: string) => {
-    if (activeSlot == null) return
-    setPicks(prev => prev.map((p, i) => i === activeSlot ? playerId : p))
+  // Drop a player into the best slot: the one you tapped (if eligible & empty),
+  // else the first empty slot they qualify for, else the first eligible slot.
+  const assignPlayer = (p: PoolPlayer) => {
+    const eligible = slots.map((s, i) => ({ s, i })).filter(({ s }) => p.positions.includes(s)).map(({ i }) => i)
+    if (eligible.length === 0) return
+    let target = activeSlot != null && eligible.includes(activeSlot) && !picks[activeSlot] ? activeSlot : null
+    if (target == null) target = eligible.find(i => !picks[i]) ?? null
+    if (target == null) target = eligible[0] // all eligible slots full → replace the first
+    const t = target
+    setPicks(prev => prev.map((pid, i) => i === t ? p.playerId : pid))
     setActiveSlot(null)
-    setSearch('')
+    setSaveMsg('')
+  }
+
+  // Tapping a slot filters the browser to that position (and targets that slot)
+  const tapSlot = (i: number) => {
+    setActiveSlot(i)
+    setPosFilter(slots[i] as any)
     setSaveMsg('')
   }
 
@@ -236,7 +262,7 @@ export default function SevensPage() {
                     <button
                       key={i}
                       disabled={slotLocked}
-                      onClick={() => { setActiveSlot(i); setSearch('') }}
+                      onClick={() => tapSlot(i)}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${activeSlot === i ? 'border-emerald-400 bg-emerald-50/40' : player ? 'border-slate-200' : 'border-dashed border-slate-300'} ${player?.locked ? 'bg-slate-50' : ''} ${slotLocked ? 'cursor-default' : 'hover:border-emerald-300'}`}
                     >
                       <span className="w-9 text-[10px] font-black text-slate-400 uppercase flex-shrink-0">{SLOT_SHORT[slot]}</span>
@@ -283,47 +309,69 @@ export default function SevensPage() {
               )}
             </div>
 
-            {/* Player picker */}
-            <div className="lg:w-80 w-full flex-shrink-0">
+            {/* Player browser — always visible, filterable, sortable */}
+            <div className="lg:w-96 w-full flex-shrink-0">
               <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-                <div className="px-4 py-3 bg-slate-950 flex items-center justify-between">
-                  <span className="text-sm font-bold text-white">{activeSlot != null ? `Pick a ${SLOT_LABELS[slots[activeSlot]]}` : 'Player Pool'}</span>
-                  {activeSlot != null && <button onClick={() => setActiveSlot(null)} className="text-xs text-slate-400 hover:text-white">Close</button>}
+                <div className="px-4 py-3 bg-slate-950">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-bold text-white">Players</span>
+                    <span className="text-[10px] text-slate-400">{filteredPool.length} shown</span>
+                  </div>
+                  {/* Position filter */}
+                  <div className="flex gap-1">
+                    {(['ALL', 'BACK', 'MID', 'RUCK', 'FWD'] as const).map(pos => (
+                      <button key={pos} onClick={() => { setPosFilter(pos); if (pos === 'ALL') setActiveSlot(null) }}
+                        className={`flex-1 px-1.5 py-1 rounded-lg text-[10px] font-black transition-colors ${posFilter === pos ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>
+                        {pos === 'ALL' ? 'ALL' : SLOT_SHORT[pos]}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                {activeSlot == null ? (
-                  <div className="px-4 py-10 text-center text-slate-400 text-xs">Tap a slot to choose a player.</div>
-                ) : (
-                  <>
-                    <div className="px-3 pt-3">
-                      <input type="text" placeholder="Search player…" value={search} onChange={e => setSearch(e.target.value)}
-                        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-                    </div>
-                    <div className="max-h-[28rem] overflow-y-auto divide-y divide-slate-100 mt-2">
-                      {eligibleForSlot.map(p => {
-                        const affordable = p.price <= remaining + (picks[activeSlot] ? (poolById.get(picks[activeSlot]!)?.price || 0) : 0)
-                        const selectable = affordable && !p.locked && p.named !== false
-                        return (
-                          <button key={p.playerId} onClick={() => selectable && assignPlayer(p.playerId)} disabled={!selectable}
-                            className={`w-full flex items-center gap-2 px-3 py-2 text-left ${selectable ? 'hover:bg-emerald-50' : 'opacity-40 cursor-not-allowed'}`}>
-                            <PlayerChip team={p.team} />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-semibold text-slate-800 truncate flex items-center gap-1.5">
-                                <span className="truncate">{p.playerName}</span>
-                                {p.named === false && <span className="text-[9px] font-black text-red-600 bg-red-100 rounded px-1 py-0.5 flex-shrink-0">OUT</span>}
-                                {p.locked && <span title="Game started — locked" className="text-[10px] flex-shrink-0">🔒</span>}
-                                {p.positions.length > 1 && <span className="text-[9px] font-black text-slate-400 flex-shrink-0">{p.positions.join('/')}</span>}
-                                <OpponentBadge player={p} />
-                              </p>
-                              <FormBits player={p} />
-                            </div>
-                            <span className="text-sm font-black text-emerald-600 flex-shrink-0 self-start"><Price value={p.price} /></span>
-                          </button>
-                        )
-                      })}
-                      {eligibleForSlot.length === 0 && <div className="px-4 py-8 text-center text-slate-400 text-xs">No players match.</div>}
-                    </div>
-                  </>
-                )}
+
+                {/* Sort + price filter + search */}
+                <div className="px-3 pt-3 space-y-2">
+                  <div className="flex gap-2">
+                    <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}
+                      className="flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                      <option value="price">Sort: Price</option>
+                      <option value="avg">Sort: Season avg</option>
+                      <option value="l5">Sort: Last-5 avg</option>
+                    </select>
+                    <select value={String(priceFilter)} onChange={e => setPriceFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
+                      className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                      <option value="ALL">All prices</option>
+                      {priceTiers.map(t => <option key={t} value={t}>Ƒ{t} only</option>)}
+                    </select>
+                  </div>
+                  <input type="text" placeholder="Search player…" value={search} onChange={e => setSearch(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </div>
+
+                <div className="max-h-[32rem] overflow-y-auto divide-y divide-slate-100 mt-2">
+                  {filteredPool.map(p => {
+                    const eligibleEmpty = slots.some((s, i) => p.positions.includes(s) && !picks[i])
+                    const affordable = p.price <= remaining || !eligibleEmpty // if no empty slot it's a swap; let assign handle
+                    const selectable = !locked && !p.locked && p.named !== false && (affordable || eligibleEmpty)
+                    return (
+                      <button key={p.playerId} onClick={() => selectable && assignPlayer(p)} disabled={!selectable}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-left ${selectable ? 'hover:bg-emerald-50' : 'opacity-40 cursor-not-allowed'}`}>
+                        <PlayerChip team={p.team} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-slate-800 truncate flex items-center gap-1.5">
+                            <span className="truncate">{p.playerName}</span>
+                            {p.named === false && <span className="text-[9px] font-black text-red-600 bg-red-100 rounded px-1 py-0.5 flex-shrink-0">OUT</span>}
+                            {p.locked && <span title="Game started — locked" className="text-[10px] flex-shrink-0">🔒</span>}
+                            <span className="text-[9px] font-black text-slate-400 flex-shrink-0">{p.positions.map(s => SLOT_SHORT[s]).join('/')}</span>
+                            <OpponentBadge player={p} />
+                          </p>
+                          <FormBits player={p} />
+                        </div>
+                        <span className="text-sm font-black text-emerald-600 flex-shrink-0 self-start"><Price value={p.price} /></span>
+                      </button>
+                    )
+                  })}
+                  {filteredPool.length === 0 && <div className="px-4 py-8 text-center text-slate-400 text-xs">No players match these filters.</div>}
+                </div>
               </div>
             </div>
           </div>
