@@ -18,6 +18,8 @@ interface PoolPlayer {
   last5Avg: number
   opponent: string | null
   isHome: boolean | null
+  gameStart: string | null
+  locked: boolean
 }
 
 /** Coin icon + amount — the Freakazoid price. */
@@ -228,12 +230,13 @@ export default function SevensPage() {
                   const pid = picks[i]
                   const player = pid ? poolById.get(pid) : null
                   const tp = existingTeam?.players.find(p => p.playerId === pid)
+                  const slotLocked = locked || !!player?.locked // round done, or this player's game started
                   return (
                     <button
                       key={i}
-                      disabled={locked}
+                      disabled={slotLocked}
                       onClick={() => { setActiveSlot(i); setSearch('') }}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${activeSlot === i ? 'border-emerald-400 bg-emerald-50/40' : player ? 'border-slate-200' : 'border-dashed border-slate-300'} ${locked ? 'cursor-default' : 'hover:border-emerald-300'}`}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${activeSlot === i ? 'border-emerald-400 bg-emerald-50/40' : player ? 'border-slate-200' : 'border-dashed border-slate-300'} ${player?.locked ? 'bg-slate-50' : ''} ${slotLocked ? 'cursor-default' : 'hover:border-emerald-300'}`}
                     >
                       <span className="w-9 text-[10px] font-black text-slate-400 uppercase flex-shrink-0">{SLOT_SHORT[slot]}</span>
                       {player ? (
@@ -242,13 +245,14 @@ export default function SevensPage() {
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-bold text-slate-900 truncate flex items-center gap-1.5">
                               <span className="truncate">{player.playerName}</span>
+                              {player.locked && <span title="Game started — locked" className="text-[10px] flex-shrink-0">🔒</span>}
                               <OpponentBadge player={player} />
-                              {locked && tp?.points != null ? <span className="text-[10px] font-black text-emerald-600 flex-shrink-0">scored {tp.points}</span> : null}
+                              {tp?.points != null ? <span className="text-[10px] font-black text-emerald-600 flex-shrink-0">scored {tp.points}</span> : null}
                             </p>
                             <FormBits player={player} />
                           </div>
                           <span className="text-sm font-black text-emerald-600 flex-shrink-0 self-start"><Price value={player.price} /></span>
-                          {!locked && <span onClick={(e) => { e.stopPropagation(); clearSlot(i) }} className="text-slate-300 hover:text-red-400 font-bold px-1 self-start">×</span>}
+                          {!slotLocked && <span onClick={(e) => { e.stopPropagation(); clearSlot(i) }} className="text-slate-300 hover:text-red-400 font-bold px-1 self-start">×</span>}
                         </>
                       ) : (
                         <span className="flex-1 text-sm text-slate-400">Tap to pick a {SLOT_LABELS[slot].toLowerCase()}</span>
@@ -295,13 +299,15 @@ export default function SevensPage() {
                     <div className="max-h-[28rem] overflow-y-auto divide-y divide-slate-100 mt-2">
                       {eligibleForSlot.map(p => {
                         const affordable = p.price <= remaining + (picks[activeSlot] ? (poolById.get(picks[activeSlot]!)?.price || 0) : 0)
+                        const selectable = affordable && !p.locked
                         return (
-                          <button key={p.playerId} onClick={() => assignPlayer(p.playerId)} disabled={!affordable}
-                            className={`w-full flex items-center gap-2 px-3 py-2 text-left ${affordable ? 'hover:bg-emerald-50' : 'opacity-40 cursor-not-allowed'}`}>
+                          <button key={p.playerId} onClick={() => selectable && assignPlayer(p.playerId)} disabled={!selectable}
+                            className={`w-full flex items-center gap-2 px-3 py-2 text-left ${selectable ? 'hover:bg-emerald-50' : 'opacity-40 cursor-not-allowed'}`}>
                             <PlayerChip team={p.team} />
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-semibold text-slate-800 truncate flex items-center gap-1.5">
                                 <span className="truncate">{p.playerName}</span>
+                                {p.locked && <span title="Game started — locked" className="text-[10px] flex-shrink-0">🔒</span>}
                                 {p.positions.length > 1 && <span className="text-[9px] font-black text-slate-400 flex-shrink-0">{p.positions.join('/')}</span>}
                                 <OpponentBadge player={p} />
                               </p>

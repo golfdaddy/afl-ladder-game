@@ -81,6 +81,8 @@ export interface PoolPlayer {
   last5Avg: number    // average of those 5
   opponent: string | null // who their club plays this round
   isHome: boolean | null
+  gameStart: string | null
+  locked: boolean         // their game has started — can't be added/removed
 }
 
 export class SevensModel {
@@ -98,14 +100,15 @@ export class SevensModel {
          WHERE season_id = $1 ORDER BY round DESC LIMIT 1`,
         [seasonId]
       )
-      return existing.rows[0] ? this.withLiveStatus(existing.rows[0]) : null
+      const r = existing.rows[0]
+      if (!r) return null
+      // No upcoming games — the round is over (locked unless already scored)
+      return { id: r.id, round: r.round, budget: num(r.budget), status: r.status === 'scored' ? 'scored' : 'locked', locksAt: r.locksAt }
     }
 
     const nearest = rounds[0]
-    const locksAt = nearest.games
-      .map(g => g.date)
-      .filter(Boolean)
-      .sort()[0] || null
+    const starts = nearest.games.map(g => g.date).filter((d): d is string => !!d).sort()
+    const locksAt = starts[0] || null // first bounce, kept for reference
 
     // Upsert the round
     const result = await db.query(
@@ -123,15 +126,25 @@ export class SevensModel {
       await this.generatePool(round.id, year)
     }
 
-    return this.withLiveStatus(round)
+    // Per-game locks: the round stays editable while ANY game hasn't started.
+    const now = Date.now()
+    const anyOpen = starts.some(d => new Date(d).getTime() > now)
+    const status: SevensRound['status'] = round.status === 'scored' ? 'scored' : anyOpen ? 'open' : 'locked'
+    return { id: round.id, round: round.round, budget: num(round.budget), status, locksAt: round.locksAt }
   }
 
-  /** Derive open/locked from locks_at (stored status only advances to 'scored'). */
-  private static withLiveStatus(round: any): SevensRound {
-    const stored = round.status as SevensRound['status']
-    if (stored === 'scored') return { ...round, budget: num(round.budget) }
-    const locked = round.locksAt ? new Date(round.locksAt).getTime() <= Date.now() : false
-    return { ...round, budget: num(round.budget), status: locked ? 'locked' : 'open' }
+  /** This round's fixtures → each club's opponent, home/away, and bounce time. */
+  private static async roundFixture(year: number, roundNumber?: number) {
+    const map = new Map<string, { opponent: string; isHome: boolean; gameStart: string | null }>()
+    try {
+      const rounds = await SquiggleService.fetchAllUpcomingRounds(year)
+      const fx = (roundNumber != null ? rounds.find(r => r.round === roundNumber) : rounds[0]) || rounds[0]
+      for (const g of fx?.games || []) {
+        map.set(g.hteamName, { opponent: g.ateamName, isHome: true, gameStart: g.date })
+        map.set(g.ateamName, { opponent: g.hteamName, isHome: false, gameStart: g.date })
+      }
+    } catch { /* fixtures are display/lock-only */ }
+    return map
   }
 
   /**
@@ -189,16 +202,8 @@ export class SevensModel {
   }
 
   static async getPool(sevensRoundId: number, year: number, roundNumber?: number): Promise<PoolPlayer[]> {
-    // This round's fixtures → each club's opponent (for the matchup display)
-    const opponentByTeam = new Map<string, { opponent: string; isHome: boolean }>()
-    try {
-      const rounds = await SquiggleService.fetchAllUpcomingRounds(year)
-      const fixture = (roundNumber != null ? rounds.find(r => r.round === roundNumber) : rounds[0]) || rounds[0]
-      for (const g of fixture?.games || []) {
-        opponentByTeam.set(g.hteamName, { opponent: g.ateamName, isHome: true })
-        opponentByTeam.set(g.ateamName, { opponent: g.hteamName, isHome: false })
-      }
-    } catch { /* opponents are display-only */ }
+    const opponentByTeam = await this.roundFixture(year, roundNumber)
+    const now = Date.now()
 
     // Form (last 5 scores) computed fresh so it tracks the live season,
     // even though the price was snapshotted from the season average.
@@ -220,12 +225,13 @@ export class SevensModel {
       [sevensRoundId, year]
     )
     const haveFixtures = opponentByTeam.size > 0
-    return result.rows
+    const players: PoolPlayer[] = result.rows
       // When we know the fixtures, only players whose club plays this round are
       // selectable — a player on a bye scores 0, so they're not in the pool.
       .filter((r: any) => !haveFixtures || opponentByTeam.has(r.team))
       .map((r: any) => {
         const opp = opponentByTeam.get(r.team)
+        const gameStart = opp?.gameStart ?? null
         return {
           ...r,
           avgPoints: num(r.avgPoints),
@@ -234,8 +240,13 @@ export class SevensModel {
           last5Avg: r.last5Avg == null ? num(r.avgPoints) : num(r.last5Avg),
           opponent: opp?.opponent ?? null,
           isHome: opp?.isHome ?? null,
+          gameStart,
+          locked: gameStart ? new Date(gameStart).getTime() <= now : false,
         }
       })
+    // Locked players (game started) sink to the bottom of their price tier
+    players.sort((a, b) => (a.locked === b.locked ? 0 : a.locked ? 1 : -1) || b.price - a.price)
+    return players
   }
 
   /**
@@ -252,6 +263,14 @@ export class SevensModel {
     const round = await this.getActiveRound(seasonId, year)
     if (!round) throw Object.assign(new Error('No active Super Sevens round'), { status: 404 })
     if (round.status !== 'open') throw Object.assign(new Error('This round has locked — teams are final'), { status: 400 })
+
+    // Per-game locks: which clubs have already bounced
+    const fixture = await this.roundFixture(year, round.round)
+    const now = Date.now()
+    const teamLocked = (team: string) => {
+      const gs = fixture.get(team)?.gameStart
+      return gs ? new Date(gs).getTime() <= now : false
+    }
 
     // Shape checks
     if (!Array.isArray(picks) || picks.length !== TEAM_SIZE) {
@@ -275,12 +294,12 @@ export class SevensModel {
 
     // Validate every pick against the round's priced pool
     const poolRows = await db.query(
-      `SELECT player_id as "playerId", player_name as "playerName", positions, price
+      `SELECT player_id as "playerId", player_name as "playerName", team_internal as "team", positions, price
        FROM sevens_player_pool WHERE sevens_round_id = $1 AND player_id = ANY($2::varchar[])`,
       [round.id, playerIds]
     )
-    const poolById = new Map<string, { playerName: string; positions: string[]; price: number }>()
-    for (const r of poolRows.rows) poolById.set(r.playerId, { playerName: r.playerName, positions: r.positions, price: num(r.price) })
+    const poolById = new Map<string, { playerName: string; team: string; positions: string[]; price: number }>()
+    for (const r of poolRows.rows) poolById.set(r.playerId, { playerName: r.playerName, team: r.team, positions: r.positions, price: num(r.price) })
 
     let totalPrice = 0
     const resolved = picks.map(p => {
@@ -290,19 +309,43 @@ export class SevensModel {
         throw Object.assign(new Error(`${pool.playerName} can't play ${p.slot}`), { status: 400 })
       }
       totalPrice += pool.price
-      return { playerId: p.playerId, slot: p.slot, price: pool.price }
+      return { playerId: p.playerId, slot: p.slot, price: pool.price, team: pool.team }
     })
 
     if (totalPrice > round.budget) {
       throw Object.assign(new Error(`Over budget by ${totalPrice - round.budget} — cap is ${round.budget}`), { status: 400 })
     }
 
+    // Per-game lock enforcement. Players whose game has started are frozen:
+    // an existing locked pick must be kept; you can't add a started-game player.
+    const existing = await db.query(
+      `SELECT tp.player_id as "playerId", tp.slot, pp.team_internal as "team", pp.player_name as "playerName"
+       FROM sevens_team_players tp
+       JOIN sevens_teams t ON t.id = tp.team_id
+       JOIN sevens_player_pool pp ON pp.sevens_round_id = t.sevens_round_id AND pp.player_id = tp.player_id
+       WHERE t.sevens_round_id = $1 AND t.user_id = $2`,
+      [round.id, userId]
+    )
+    const submitted = new Map(resolved.map(r => [r.playerId, r.slot]))
+    // 1) Every locked existing pick must remain, in the same slot
+    for (const e of existing.rows) {
+      if (teamLocked(e.team) && submitted.get(e.playerId) !== e.slot) {
+        throw Object.assign(new Error(`${e.playerName} is locked — their game has started, you can't change them`), { status: 400 })
+      }
+    }
+    // 2) Can't bring in a player whose game has already started (unless they were already locked-in)
+    const hadBefore = new Set(existing.rows.map((e: any) => e.playerId))
+    for (const r of resolved) {
+      if (teamLocked(r.team) && !hadBefore.has(r.playerId)) {
+        throw Object.assign(new Error(`${poolById.get(r.playerId)!.playerName}'s game has started — too late to pick them`), { status: 400 })
+      }
+    }
+
     return db.transaction(async (client) => {
-      // Re-check the lock inside the transaction (guards a bounce-time race)
-      const lockRow = await client.query(`SELECT status, locks_at as "locksAt" FROM sevens_rounds WHERE id = $1 FOR UPDATE`, [round.id])
-      const live = lockRow.rows[0]
-      const lockedNow = live.status === 'scored' || (live.locksAt && new Date(live.locksAt).getTime() <= Date.now())
-      if (lockedNow) throw Object.assign(new Error('This round just locked — teams are final'), { status: 400 })
+      // Per-game locks above guard individual players; here we only block a
+      // round that's already been scored (fully done).
+      const lockRow = await client.query(`SELECT status FROM sevens_rounds WHERE id = $1 FOR UPDATE`, [round.id])
+      if (lockRow.rows[0].status === 'scored') throw Object.assign(new Error('This round has been scored — teams are final'), { status: 400 })
 
       const team = await client.query(
         `INSERT INTO sevens_teams (sevens_round_id, user_id, total_price, updated_at)
