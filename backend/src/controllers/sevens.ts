@@ -20,7 +20,7 @@ export class SevensController {
     const round = await SevensModel.getActiveRound(season.id, season.year)
     if (!round) return res.status(404).json({ error: 'No active round' })
     const [pool, team] = await Promise.all([
-      SevensModel.getPool(round.id, season.year),
+      SevensModel.getPool(round.id, season.year, round.round),
       SevensModel.getMyTeam(req.userId, round.id),
     ])
     res.json({ round, formation: FORMATION, teamSize: TEAM_SIZE, pool, team })

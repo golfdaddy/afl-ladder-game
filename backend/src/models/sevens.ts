@@ -79,6 +79,8 @@ export interface PoolPlayer {
   price: number
   last5: number[]     // most recent 5 fantasy scores, oldest→newest (form, display only)
   last5Avg: number    // average of those 5
+  opponent: string | null // who their club plays this round
+  isHome: boolean | null
 }
 
 export class SevensModel {
@@ -186,7 +188,18 @@ export class SevensModel {
     return inserted
   }
 
-  static async getPool(sevensRoundId: number, year: number): Promise<PoolPlayer[]> {
+  static async getPool(sevensRoundId: number, year: number, roundNumber?: number): Promise<PoolPlayer[]> {
+    // This round's fixtures → each club's opponent (for the matchup display)
+    const opponentByTeam = new Map<string, { opponent: string; isHome: boolean }>()
+    try {
+      const rounds = await SquiggleService.fetchAllUpcomingRounds(year)
+      const fixture = (roundNumber != null ? rounds.find(r => r.round === roundNumber) : rounds[0]) || rounds[0]
+      for (const g of fixture?.games || []) {
+        opponentByTeam.set(g.hteamName, { opponent: g.ateamName, isHome: true })
+        opponentByTeam.set(g.ateamName, { opponent: g.hteamName, isHome: false })
+      }
+    } catch { /* opponents are display-only */ }
+
     // Form (last 5 scores) computed fresh so it tracks the live season,
     // even though the price was snapshotted from the season average.
     const result = await db.query(
@@ -206,13 +219,23 @@ export class SevensModel {
        ORDER BY pp.price DESC, pp.player_name ASC`,
       [sevensRoundId, year]
     )
-    return result.rows.map((r: any) => ({
-      ...r,
-      avgPoints: num(r.avgPoints),
-      price: num(r.price),
-      last5: (r.last5 || []).map((v: any) => Math.round(num(v))),
-      last5Avg: r.last5Avg == null ? num(r.avgPoints) : num(r.last5Avg),
-    }))
+    const haveFixtures = opponentByTeam.size > 0
+    return result.rows
+      // When we know the fixtures, only players whose club plays this round are
+      // selectable — a player on a bye scores 0, so they're not in the pool.
+      .filter((r: any) => !haveFixtures || opponentByTeam.has(r.team))
+      .map((r: any) => {
+        const opp = opponentByTeam.get(r.team)
+        return {
+          ...r,
+          avgPoints: num(r.avgPoints),
+          price: num(r.price),
+          last5: (r.last5 || []).map((v: any) => Math.round(num(v))),
+          last5Avg: r.last5Avg == null ? num(r.avgPoints) : num(r.last5Avg),
+          opponent: opp?.opponent ?? null,
+          isHome: opp?.isHome ?? null,
+        }
+      })
   }
 
   /**

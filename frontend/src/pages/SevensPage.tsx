@@ -5,7 +5,7 @@ import api from '../services/api'
 import { useAuthStore } from '../store/auth'
 import { getTeamMeta } from '../utils/aflTeams'
 import { SevensLogo, SLOT_LABELS, SLOT_SHORT } from '../components/SevensBrand'
-import { FREAK_SYMBOL, FreakCoin } from '../components/FreakbetBrand'
+import { FreakCoin } from '../components/FreakbetBrand'
 
 interface PoolPlayer {
   playerId: string
@@ -16,9 +16,28 @@ interface PoolPlayer {
   price: number
   last5: number[]
   last5Avg: number
+  opponent: string | null
+  isHome: boolean | null
 }
 
-/** Season avg + last-5 avg (form, green if hot / red if cold) + the 5 scores. */
+/** Coin icon + amount — the Freakazoid price. */
+function Price({ value, className = '' }: { value: number; className?: string }) {
+  return <span className={`inline-flex items-center gap-0.5 ${className}`}><FreakCoin size={13} />{value}</span>
+}
+
+/** This round's matchup: vs (home) / @ (away) + opponent abbreviation in their colours. */
+function OpponentBadge({ player }: { player: PoolPlayer }) {
+  if (!player.opponent) return <span className="text-[9px] font-black text-amber-600 bg-amber-50 rounded px-1 py-0.5">BYE</span>
+  const meta = getTeamMeta(player.opponent)
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500">
+      {player.isHome ? 'vs' : '@'}
+      <span className="px-1 py-0.5 rounded text-[9px] font-black" style={{ backgroundColor: `${meta.primaryColor}1a`, color: meta.primaryColor }}>{meta.shortName}</span>
+    </span>
+  )
+}
+
+/** Season avg + last-5 avg (form trend) + the 5 scores, each coloured vs the player's average. */
 function FormBits({ player }: { player: PoolPlayer }) {
   const hot = player.last5Avg - player.avgPoints
   const trend = Math.abs(hot) < 2 ? 'flat' : hot > 0 ? 'up' : 'down'
@@ -30,9 +49,12 @@ function FormBits({ player }: { player: PoolPlayer }) {
       </span>
       {player.last5.length > 0 && (
         <span className="flex items-center gap-0.5">
-          {player.last5.map((s, i) => (
-            <span key={i} className="text-[9px] font-semibold text-slate-500 bg-slate-100 rounded px-1 py-0.5 tabular-nums">{s}</span>
-          ))}
+          {player.last5.map((s, i) => {
+            const above = s >= player.avgPoints
+            return (
+              <span key={i} className={`text-[9px] font-bold rounded px-1 py-0.5 tabular-nums ${above ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>{s}</span>
+            )
+          })}
         </span>
       )}
     </div>
@@ -171,7 +193,7 @@ export default function SevensPage() {
               {round && (
                 <div className="text-right">
                   <p className="text-[10px] text-slate-400 uppercase tracking-wide">Round {round.round} · {locked ? 'Locked' : 'Budget'}</p>
-                  {!locked && <p className={`text-sm font-black flex items-center justify-end gap-1 ${remaining < 0 ? 'text-red-400' : 'text-emerald-400'}`}><FreakCoin size={13} />{FREAK_SYMBOL}{remaining} / {FREAK_SYMBOL}{budget}</p>}
+                  {!locked && <p className={`text-sm font-black flex items-center justify-end gap-1 ${remaining < 0 ? 'text-red-400' : 'text-emerald-400'}`}><FreakCoin size={13} />{remaining} / {budget}</p>}
                 </div>
               )}
               <button onClick={() => { logout(); navigate('/welcome') }} className="px-3 py-1.5 text-sm font-medium text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg transition-colors">Sign out</button>
@@ -189,7 +211,7 @@ export default function SevensPage() {
               </button>
             ))}
           </div>
-          <p className="text-xs text-slate-400 flex items-center gap-1 flex-wrap">Pick 2 defenders, 2 mids, 1 ruck, 2 forwards. <FreakCoin size={12} />{FREAK_SYMBOL}{budget} of Freakazoids — the elite cost {FREAK_SYMBOL}10, fringe players {FREAK_SYMBOL}1.</p>
+          <p className="text-xs text-slate-400 flex items-center gap-1 flex-wrap">Pick 2 defenders, 2 mids, 1 ruck, 2 forwards. <FreakCoin size={12} />{budget} Freakazoids — the elite cost <FreakCoin size={11} />10, fringe players <FreakCoin size={11} />1.</p>
         </div>
 
         {/* ── TEAM BUILDER ── */}
@@ -218,10 +240,14 @@ export default function SevensPage() {
                         <>
                           <PlayerChip team={player.team} />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-slate-900 truncate">{player.playerName} <span className="text-[10px] font-semibold text-slate-400">{SLOT_LABELS[slot]}</span>{locked && tp?.points != null ? <span className="ml-1 text-[10px] font-black text-emerald-600">scored {tp.points}</span> : null}</p>
+                            <p className="text-sm font-bold text-slate-900 truncate flex items-center gap-1.5">
+                              <span className="truncate">{player.playerName}</span>
+                              <OpponentBadge player={player} />
+                              {locked && tp?.points != null ? <span className="text-[10px] font-black text-emerald-600 flex-shrink-0">scored {tp.points}</span> : null}
+                            </p>
                             <FormBits player={player} />
                           </div>
-                          <span className="text-sm font-black text-emerald-600 flex-shrink-0 self-start">{FREAK_SYMBOL}{player.price}</span>
+                          <span className="text-sm font-black text-emerald-600 flex-shrink-0 self-start"><Price value={player.price} /></span>
                           {!locked && <span onClick={(e) => { e.stopPropagation(); clearSlot(i) }} className="text-slate-300 hover:text-red-400 font-bold px-1 self-start">×</span>}
                         </>
                       ) : (
@@ -237,7 +263,7 @@ export default function SevensPage() {
                 <div className="mt-3 bg-white rounded-2xl border border-slate-200 p-4 flex items-center justify-between gap-3 flex-wrap">
                   <div className="text-xs">
                     <span className="text-slate-500">{filledCount}/{slots.length} picked · </span>
-                    <span className={remaining < 0 ? 'text-red-500 font-bold' : 'text-slate-700 font-bold'}>{FREAK_SYMBOL}{remaining} of {FREAK_SYMBOL}{budget} left</span>
+                    <span className={`inline-flex items-center gap-0.5 ${remaining < 0 ? 'text-red-500 font-bold' : 'text-slate-700 font-bold'}`}><FreakCoin size={12} />{remaining} of <FreakCoin size={12} />{budget} left</span>
                     {saveMsg && <span className="ml-2 text-emerald-600 font-semibold">{saveMsg}</span>}
                   </div>
                   <button
@@ -274,10 +300,14 @@ export default function SevensPage() {
                             className={`w-full flex items-center gap-2 px-3 py-2 text-left ${affordable ? 'hover:bg-emerald-50' : 'opacity-40 cursor-not-allowed'}`}>
                             <PlayerChip team={p.team} />
                             <div className="flex-1 min-w-0">
-                              <p className="text-xs font-semibold text-slate-800 truncate">{p.playerName}{p.positions.length > 1 ? <span className="ml-1 text-[9px] font-black text-slate-400">{p.positions.join('/')}</span> : null}</p>
+                              <p className="text-xs font-semibold text-slate-800 truncate flex items-center gap-1.5">
+                                <span className="truncate">{p.playerName}</span>
+                                {p.positions.length > 1 && <span className="text-[9px] font-black text-slate-400 flex-shrink-0">{p.positions.join('/')}</span>}
+                                <OpponentBadge player={p} />
+                              </p>
                               <FormBits player={p} />
                             </div>
-                            <span className="text-sm font-black text-emerald-600 flex-shrink-0 self-start">{FREAK_SYMBOL}{p.price}</span>
+                            <span className="text-sm font-black text-emerald-600 flex-shrink-0 self-start"><Price value={p.price} /></span>
                           </button>
                         )
                       })}
@@ -303,7 +333,7 @@ export default function SevensPage() {
                     <div key={row.userId} className={`flex items-center gap-3 px-4 py-3 ${isMe ? 'bg-emerald-50/60' : ''}`}>
                       <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-black flex-shrink-0 ${idx === 0 ? 'bg-amber-400 text-white' : 'bg-slate-100 text-slate-500'}`}>{idx + 1}</span>
                       <span className={`flex-1 text-sm font-semibold truncate ${isMe ? 'text-emerald-800' : 'text-slate-900'}`}>{row.displayName}{isMe ? ' (you)' : ''}</span>
-                      <span className="text-[10px] text-slate-400">{FREAK_SYMBOL}{row.totalPrice}</span>
+                      <span className="text-[10px] text-slate-400 inline-flex items-center gap-0.5"><FreakCoin size={11} />{row.totalPrice}</span>
                       <span className="text-sm font-black text-slate-900">{row.score == null ? '—' : row.score}</span>
                     </div>
                   )
