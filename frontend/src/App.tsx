@@ -23,7 +23,8 @@ import FantasyLeaderboardPage from './pages/FantasyLeaderboardPage'
 import FantasyInviteAcceptPage from './pages/FantasyInviteAcceptPage'
 import SettingsPage from './pages/SettingsPage'
 import MultiPage from './pages/MultiPage'
-import { FEATURE_FANTASY7_ENABLED, FEATURE_MULTI_ENABLED } from './config'
+import MultiAuthPage from './pages/MultiAuthPage'
+import { FEATURE_FANTASY7_ENABLED, MULTI_ONLY } from './config'
 
 const queryClient = new QueryClient()
 
@@ -36,6 +37,34 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function MultiProtectedRoute({ children }: { children: React.ReactNode }) {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  if (!isAuthenticated) return <Navigate to="/welcome" replace />
+  return <>{children}</>
+}
+
+/**
+ * The Multi product is deployed as its own app on its own domain.
+ * This build contains no ladder routes and never references the ladder.
+ */
+function MultiApp() {
+  return (
+    <Routes>
+      <Route path="/welcome" element={<MultiAuthPage />} />
+      <Route path="/join/:code" element={<MultiAuthPage />} />
+      <Route
+        path="/"
+        element={
+          <MultiProtectedRoute>
+            <MultiPage />
+          </MultiProtectedRoute>
+        }
+      />
+      <Route path="*" element={<Navigate to="/" />} />
+    </Routes>
+  )
+}
+
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isAdmin } = useAuthStore()
   if (!isAuthenticated) return <Navigate to="/login" />
@@ -44,6 +73,18 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
+  if (MULTI_ONLY) {
+    return (
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <MultiApp />
+          </BrowserRouter>
+        </QueryClientProvider>
+      </ErrorBoundary>
+    )
+  }
+
   return (
     <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
@@ -145,16 +186,6 @@ function App() {
                 }
               />
             </>
-          )}
-          {FEATURE_MULTI_ENABLED && (
-            <Route
-              path="/multi"
-              element={
-                <ProtectedRoute>
-                  <MultiPage />
-                </ProtectedRoute>
-              }
-            />
           )}
           <Route
             path="/settings"

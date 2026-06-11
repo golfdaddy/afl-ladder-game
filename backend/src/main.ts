@@ -18,8 +18,14 @@ const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Australia/Melbourne';
 
 // Middleware
 app.use(helmet());
+// FRONTEND_URL supports a comma-separated list — the ladder app and the
+// Multi app are separate deployments sharing this API
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
   credentials: true
 }));
 app.use(express.json());

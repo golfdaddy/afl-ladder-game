@@ -9,7 +9,7 @@ import {
 } from '../utils/aflTeams'
 import FullSeasonSimulator from '../components/FullSeasonSimulator'
 import FinalsPredictor from '../components/FinalsPredictor'
-import { SEASON_OVER, FEATURE_FANTASY7_ENABLED, FEATURE_MULTI_ENABLED } from '../config'
+import { SEASON_OVER, FEATURE_FANTASY7_ENABLED } from '../config'
 import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 function useCountdown(target: Date) {
@@ -442,14 +442,6 @@ export default function DashboardPage() {
                   className="px-3 py-1.5 text-sm font-medium text-blue-300 hover:text-blue-200 border border-blue-900 hover:border-blue-700 rounded-lg transition-colors"
                 >
                   Fantasy 7
-                </button>
-              )}
-              {FEATURE_MULTI_ENABLED && (
-                <button
-                  onClick={() => navigate('/multi')}
-                  className="px-3 py-1.5 text-sm font-medium text-violet-300 hover:text-violet-200 border border-violet-900 hover:border-violet-700 rounded-lg transition-colors"
-                >
-                  Multi
                 </button>
               )}
               <button

@@ -40,4 +40,7 @@ export const SEASON_OVER = _now >= _seasonEnd
 
 export const FEATURE_FANTASY7_ENABLED = import.meta.env.VITE_FEATURE_FANTASY7_ENABLED === 'true'
 
-export const FEATURE_MULTI_ENABLED = import.meta.env.VITE_FEATURE_MULTI_ENABLED === 'true'
+// MULTI_ONLY builds serve ONLY the Multi app (its own domain, own branding).
+// The ladder build contains no Multi routes at all — the two products must
+// never be visibly associated.
+export const MULTI_ONLY = import.meta.env.VITE_MULTI_ONLY === 'true'

@@ -189,6 +189,7 @@ export default function MultiPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const user = useAuthStore((state) => state.user)
+  const logout = useAuthStore((state) => state.logout)
 
   const [view, setView] = useState<'markets' | 'bets' | 'comps' | 'leaderboard'>('markets')
   const [betContext, setBetContext] = useState<number | 'main'>('main')
@@ -415,10 +416,10 @@ export default function MultiPage() {
                 <p className="text-sm font-black text-emerald-400">{money(balance)}</p>
               </div>
               <button
-                onClick={() => navigate('/dashboard')}
+                onClick={() => { logout(); navigate('/welcome') }}
                 className="px-3 py-1.5 text-sm font-medium text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg transition-colors"
               >
-                ← Dashboard
+                Sign out
               </button>
             </div>
           </div>
@@ -883,9 +884,9 @@ export default function MultiPage() {
                         <p className="text-sm font-black text-slate-900">{comp.status === 'open' ? money(comp.myBalance) : comp.myPayout != null && comp.myPayout > 0 ? `+${money(comp.myPayout)}` : money(comp.myBalance)}</p>
                       </div>
                       <button
-                        onClick={() => { navigator.clipboard?.writeText(comp.joinCode); setCompMsg(`Code ${comp.joinCode} copied — send it to your mates`) }}
+                        onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/join/${comp.joinCode}`); setCompMsg(`Invite link copied — send it to your mates. Code: ${comp.joinCode}`) }}
                         className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-black tracking-widest text-slate-700"
-                        title="Copy join code"
+                        title="Copy invite link"
                       >
                         {comp.joinCode}
                       </button>
