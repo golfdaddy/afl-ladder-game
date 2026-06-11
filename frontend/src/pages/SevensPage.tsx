@@ -213,19 +213,19 @@ export default function SevensPage() {
     <div className="min-h-screen bg-slate-50">
       <nav className="bg-slate-950">
         <div className="max-w-5xl mx-auto px-4 sm:px-6">
-          <div className="flex justify-between h-16 items-center">
-            <div className="flex items-center gap-3">
-              <SevensLogo size={34} />
-              <span className="text-white font-black text-lg tracking-wide">SUPER SEVENS</span>
+          <div className="flex justify-between h-16 items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <SevensLogo size={32} />
+              <span className="text-white font-black text-base sm:text-lg tracking-wide whitespace-nowrap">SUPER SEVENS</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
               {round && (
-                <div className="text-right">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wide">Round {round.round} · {locked ? 'Locked' : 'Budget'}</p>
-                  {!locked && <p className={`text-sm font-black flex items-center justify-end gap-1 ${remaining < 0 ? 'text-red-400' : 'text-emerald-400'}`}><FreakCoin size={13} />{remaining} / {budget}</p>}
+                <div className="text-right leading-tight">
+                  <p className="text-[9px] text-slate-400 uppercase tracking-wide whitespace-nowrap">R{round.round} · {locked ? 'Locked' : 'Budget'}</p>
+                  {!locked && <p className={`text-sm font-black flex items-center justify-end gap-1 ${remaining < 0 ? 'text-red-400' : 'text-emerald-400'}`}><FreakCoin size={13} />{remaining}/{budget}</p>}
                 </div>
               )}
-              <button onClick={() => { logout(); navigate('/welcome') }} className="px-3 py-1.5 text-sm font-medium text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg transition-colors">Sign out</button>
+              <button onClick={() => { logout(); navigate('/welcome') }} className="px-2.5 py-1.5 text-xs sm:text-sm font-medium text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg transition-colors whitespace-nowrap">Sign out</button>
             </div>
           </div>
         </div>
