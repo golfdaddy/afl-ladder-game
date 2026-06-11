@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
 import { getTeamMeta } from '../utils/aflTeams'
+import { FreakbetLogo, FreakCoin, freaks, FREAK_SYMBOL } from '../components/FreakbetBrand'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -159,7 +160,7 @@ interface LeaderboardRow {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-const money = (v: number) => `$${v.toFixed(2)}`
+const money = freaks
 
 function statusChip(status: string) {
   const map: Record<string, string> = {
@@ -404,11 +405,11 @@ export default function MultiPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-violet-500 rounded-xl flex items-center justify-center">
-                <span className="text-white font-black text-xs tracking-tight">×</span>
-              </div>
-              <span className="text-white font-bold text-lg tracking-wide">Multi</span>
-              <span className="px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 text-[10px] font-bold uppercase tracking-wide">Play money</span>
+              <FreakbetLogo size={36} />
+              <span className="text-white font-black text-lg tracking-wide italic">FREAKBET</span>
+              <span className="px-2 py-0.5 rounded-full bg-lime-400/15 text-lime-300 text-[10px] font-bold uppercase tracking-wide flex items-center gap-1">
+                <FreakCoin size={12} /> Freakazoids only
+              </span>
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right">
@@ -441,7 +442,7 @@ export default function MultiPage() {
               </button>
             ))}
           </div>
-          <p className="text-xs text-slate-400">Fake cash, real bragging rights. Odds from Squiggle model probabilities.</p>
+          <p className="text-xs text-slate-400">Freakazoids aren't money — they're better. Odds from Squiggle model probabilities.</p>
         </div>
 
         {/* ── MARKETS ── */}
@@ -674,7 +675,7 @@ export default function MultiPage() {
                     <p className="text-[10px] text-slate-400">Same-game legs are related, so combined odds take a haircut — just like the real SGM.</p>
                   )}
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-500 font-semibold flex-shrink-0">Stake $</span>
+                    <span className="text-xs text-slate-500 font-semibold flex-shrink-0 flex items-center gap-0.5">Stake <FreakCoin size={12} /></span>
                     <input
                       type="number"
                       min="1"
@@ -821,16 +822,16 @@ export default function MultiPage() {
                   )}
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Buy-in $
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Buy-in {FREAK_SYMBOL}
                     <input type="number" min="0" value={compForm.buyIn} onChange={e => setCompForm(f => ({ ...f, buyIn: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-bold" />
                   </label>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Budget $
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Budget {FREAK_SYMBOL}
                     <input type="number" min="1" value={compForm.startingBudget} onChange={e => setCompForm(f => ({ ...f, startingBudget: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-bold" />
                   </label>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Min bet $
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Min bet {FREAK_SYMBOL}
                     <input type="number" min="0" placeholder="—" value={compForm.minBet} onChange={e => setCompForm(f => ({ ...f, minBet: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-bold" />
                   </label>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Max bet $
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Max bet {FREAK_SYMBOL}
                     <input type="number" min="0" placeholder="—" value={compForm.maxBet} onChange={e => setCompForm(f => ({ ...f, maxBet: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-bold" />
                   </label>
                 </div>

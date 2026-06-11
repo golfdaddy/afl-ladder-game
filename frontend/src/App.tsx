@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { applyFreakbetChrome } from './components/FreakbetBrand'
 import { useAuthStore } from './store/auth'
 import { ErrorBoundary } from './components/ErrorBoundary'
 
@@ -44,10 +46,13 @@ function MultiProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * The Multi product is deployed as its own app on its own domain.
+ * Freakbet (internally "Multi") is deployed as its own app on its own domain.
  * This build contains no ladder routes and never references the ladder.
  */
 function MultiApp() {
+  useEffect(() => {
+    applyFreakbetChrome()
+  }, [])
   return (
     <Routes>
       <Route path="/welcome" element={<MultiAuthPage />} />

@@ -47,7 +47,7 @@ export class MultiCompsModel {
       // Buy-in comes out of the creator's main wallet
       const account = await this.lockMainAccount(client, userId, seasonId)
       if (buyIn > 0 && account.balance < buyIn) {
-        throw Object.assign(new Error(`Buy-in exceeds your balance ($${account.balance.toFixed(2)})`), { status: 400 })
+        throw Object.assign(new Error(`Buy-in exceeds your balance (Ƒ${account.balance.toFixed(2)})`), { status: 400 })
       }
 
       // Join codes collide rarely; retry a few times
@@ -90,7 +90,7 @@ export class MultiCompsModel {
     return db.transaction(async (client) => {
       const account = await this.lockMainAccount(client, userId, seasonId)
       if (buyIn > 0 && account.balance < buyIn) {
-        throw Object.assign(new Error(`Buy-in is $${buyIn.toFixed(2)} — your balance is $${account.balance.toFixed(2)}`), { status: 400 })
+        throw Object.assign(new Error(`Buy-in is Ƒ${buyIn.toFixed(2)} — your balance is Ƒ${account.balance.toFixed(2)}`), { status: 400 })
       }
       await this.addMember(client, comp.id, userId, account.id, account.balance, buyIn, num(comp.startingBudget))
       return { compId: comp.id }
@@ -205,10 +205,10 @@ export class MultiCompsModel {
       }
     }
     if (comp.minBet != null && stake < num(comp.minBet)) {
-      throw Object.assign(new Error(`Minimum bet in this comp is $${num(comp.minBet).toFixed(2)}`), { status: 400 })
+      throw Object.assign(new Error(`Minimum bet in this comp is Ƒ${num(comp.minBet).toFixed(2)}`), { status: 400 })
     }
     if (comp.maxBet != null && stake > num(comp.maxBet)) {
-      throw Object.assign(new Error(`Maximum bet in this comp is $${num(comp.maxBet).toFixed(2)}`), { status: 400 })
+      throw Object.assign(new Error(`Maximum bet in this comp is Ƒ${num(comp.maxBet).toFixed(2)}`), { status: 400 })
     }
     return { memberId: comp.memberId }
   }

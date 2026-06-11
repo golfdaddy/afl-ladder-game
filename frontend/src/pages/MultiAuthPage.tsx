@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
+import { FreakbetLogo, FreakCoin, freaks } from '../components/FreakbetBrand'
 
 const PENDING_CODE_KEY = 'multi_pending_comp_code'
 
@@ -16,7 +17,7 @@ async function tryJoinComp(code: string) {
 }
 
 /**
- * Multi's own front door — branded signup/login with optional comp invite.
+ * Freakbet's front door — branded signup/login with optional comp invite.
  * Used only in MULTI_ONLY builds; never references the ladder product.
  */
 export default function MultiAuthPage() {
@@ -75,11 +76,13 @@ export default function MultiAuthPage() {
       <div className="w-full max-w-sm">
         {/* Brand */}
         <div className="text-center mb-8">
-          <div className="w-14 h-14 bg-violet-500 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-violet-500/30">
-            <span className="text-white font-black text-2xl">×</span>
+          <div className="mx-auto mb-3 w-fit drop-shadow-[0_0_18px_rgba(139,92,246,0.45)]">
+            <FreakbetLogo size={64} />
           </div>
-          <h1 className="text-2xl font-black text-white tracking-tight">Multi</h1>
-          <p className="text-sm text-slate-400 mt-1">Footy tipping with a bookie's brain. Fake cash only.</p>
+          <h1 className="text-3xl font-black text-white tracking-tight italic">FREAKBET</h1>
+          <p className="text-sm text-slate-400 mt-1">
+            Footy betting with a bookie's brain — played in <FreakCoin size={14} /> <span className="text-lime-300 font-bold">Freakazoids</span>, never money.
+          </p>
         </div>
 
         {/* Invite banner */}
@@ -125,7 +128,7 @@ export default function MultiAuthPage() {
           </button>
         </p>
         <p className="text-center text-[10px] text-slate-600 mt-6">
-          No real money. Ever. Just bragging rights.
+          You start with {freaks(1000)}. Freakazoids are worth nothing and mean everything.
         </p>
       </div>
     </div>

@@ -113,7 +113,7 @@ export class MultiModel {
       )
       if (inserted.rows.length > 0) {
         const account = inserted.rows[0]
-        await insertTransaction(client, account.id, START_BALANCE, START_BALANCE, 'starting_balance', null, 'Welcome to Multi')
+        await insertTransaction(client, account.id, START_BALANCE, START_BALANCE, 'starting_balance', null, 'Welcome to Freakbet — your starting Freakazoids')
         return { ...account, balance: num(account.balance) }
       }
       // Raced with another request — fetch the row it created
@@ -328,13 +328,13 @@ export class MultiModel {
         const locked = await client.query(`SELECT balance FROM multi_comp_members WHERE id = $1 FOR UPDATE`, [compMember.memberId])
         balance = num(locked.rows[0].balance)
         if (balance < roundedStake) {
-          throw Object.assign(new Error(`Insufficient comp balance — you have $${balance.toFixed(2)}`), { status: 400 })
+          throw Object.assign(new Error(`Insufficient comp balance — you have Ƒ${balance.toFixed(2)}`), { status: 400 })
         }
       } else {
         const locked = await client.query(`SELECT id, balance FROM multi_accounts WHERE id = $1 FOR UPDATE`, [account.id])
         balance = num(locked.rows[0].balance)
         if (balance < roundedStake) {
-          throw Object.assign(new Error(`Insufficient balance — you have $${balance.toFixed(2)}`), { status: 400 })
+          throw Object.assign(new Error(`Insufficient balance — you have Ƒ${balance.toFixed(2)}`), { status: 400 })
         }
       }
 
