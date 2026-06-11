@@ -82,6 +82,29 @@ export class MultiController {
     }
   }
 
+  static async joinPublicComp(req: AuthRequest, res: Response) {
+    if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+    const season = await requireSeason(res)
+    if (!season) return
+    const compId = parseInt(req.params.compId)
+    if (!Number.isFinite(compId)) return res.status(400).json({ error: 'Invalid comp id' })
+    try {
+      const result = await MultiCompsModel.joinCompById(req.userId, season.id, compId)
+      res.json(result)
+    } catch (error: any) {
+      if (error.status && error.status < 500) return res.status(error.status).json({ error: error.message })
+      throw error
+    }
+  }
+
+  static async listPublicComps(req: AuthRequest, res: Response) {
+    if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+    const season = await requireSeason(res)
+    if (!season) return
+    const comps = await MultiCompsModel.listPublicComps(req.userId, season.id)
+    res.json({ comps })
+  }
+
   static async myComps(req: AuthRequest, res: Response) {
     if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
     const season = await requireSeason(res)

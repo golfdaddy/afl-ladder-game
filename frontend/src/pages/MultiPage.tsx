@@ -121,7 +121,7 @@ interface Comp {
   id: number
   name: string
   joinCode: string
-  scopeType: 'game' | 'round'
+  scopeType: 'game' | 'round' | 'season'
   scopeRound: number
   scopeGameId: number | null
   buyIn: number
@@ -130,6 +130,7 @@ interface Comp {
   maxBet: number | null
   mustSpend: boolean
   payoutRule: string
+  isPublic: boolean
   status: string
   creatorUserId: number
   memberCount: number
@@ -137,6 +138,18 @@ interface Comp {
   myStaked: number
   myPayout: number | null
   myRank: number | null
+}
+
+interface PublicComp {
+  id: number
+  name: string
+  scopeType: 'game' | 'round' | 'season'
+  scopeRound: number
+  buyIn: number
+  startingBudget: number
+  payoutRule: string
+  memberCount: number
+  creatorName: string
 }
 
 interface CompLeaderboardRow {
@@ -196,7 +209,7 @@ export default function MultiPage() {
   const [view, setView] = useState<'markets' | 'bets' | 'comps' | 'leaderboard'>('markets')
   const [betContext, setBetContext] = useState<number | 'main'>('main')
   const [expandedCompId, setExpandedCompId] = useState<number | null>(null)
-  const [compForm, setCompForm] = useState({ name: '', scopeType: 'game' as 'game' | 'round', scopeGameId: '', buyIn: '50', startingBudget: '500', minBet: '', maxBet: '', mustSpend: false, payoutRule: 'winner_takes_all' })
+  const [compForm, setCompForm] = useState({ name: '', scopeType: 'game' as 'game' | 'round' | 'season', scopeGameId: '', buyIn: '50', startingBudget: '500', minBet: '', maxBet: '', mustSpend: false, payoutRule: 'winner_takes_all', isPublic: false })
   const [compMsg, setCompMsg] = useState('')
   const [joinCode, setJoinCode] = useState('')
   const [showCreateComp, setShowCreateComp] = useState(false)
@@ -283,6 +296,7 @@ export default function MultiPage() {
       maxBet: compForm.maxBet ? Number(compForm.maxBet) : null,
       mustSpend: compForm.mustSpend,
       payoutRule: compForm.payoutRule,
+      isPublic: compForm.isPublic,
     }),
     onSuccess: (response) => {
       setCompMsg(`Comp created — share code ${response.data.joinCode}`)
@@ -297,6 +311,22 @@ export default function MultiPage() {
     onSuccess: () => {
       setCompMsg('Joined! Bets in this comp use your comp wallet.')
       setJoinCode('')
+      queryClient.invalidateQueries({ queryKey: ['multi'] })
+    },
+    onError: (err: any) => setCompMsg(err.response?.data?.error || 'Failed to join comp'),
+  })
+
+  const { data: publicCompsData } = useQuery({
+    queryKey: ['multi', 'comps', 'public'],
+    queryFn: () => api.get('/multi/comps/public').then(r => r.data),
+    enabled: view === 'comps',
+  })
+  const publicComps: PublicComp[] = publicCompsData?.comps ?? []
+
+  const joinPublicMutation = useMutation({
+    mutationFn: (compId: number) => api.post(`/multi/comps/${compId}/join`),
+    onSuccess: () => {
+      setCompMsg('Joined a public comp! Switch to it in the bet slip wallet selector.')
       queryClient.invalidateQueries({ queryKey: ['multi'] })
     },
     onError: (err: any) => setCompMsg(err.response?.data?.error || 'Failed to join comp'),
@@ -870,11 +900,12 @@ export default function MultiPage() {
                 <div className="flex gap-2 flex-wrap">
                   <select
                     value={compForm.scopeType}
-                    onChange={e => setCompForm(f => ({ ...f, scopeType: e.target.value as 'game' | 'round' }))}
+                    onChange={e => setCompForm(f => ({ ...f, scopeType: e.target.value as 'game' | 'round' | 'season' }))}
                     className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
                   >
                     <option value="game">Single game</option>
                     <option value="round">Whole round ({rounds[0]?.roundname || 'next round'})</option>
+                    <option value="season">Ongoing (whole season)</option>
                   </select>
                   {compForm.scopeType === 'game' && (
                     <select
@@ -916,6 +947,10 @@ export default function MultiPage() {
                     <input type="checkbox" checked={compForm.mustSpend} onChange={e => setCompForm(f => ({ ...f, mustSpend: e.target.checked }))} />
                     Must spend budget (unbet money is forfeited)
                   </label>
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                    <input type="checkbox" checked={compForm.isPublic} onChange={e => setCompForm(f => ({ ...f, isPublic: e.target.checked }))} />
+                    Public (anyone can find &amp; join)
+                  </label>
                 </div>
                 <button
                   onClick={() => createCompMutation.mutate()}
@@ -927,10 +962,36 @@ export default function MultiPage() {
               </div>
             )}
 
+            {/* Public comps to discover */}
+            {publicComps.length > 0 && (
+              <div>
+                <p className="text-xs font-black text-slate-400 uppercase tracking-wide mb-2">Public comps to join</p>
+                <div className="space-y-2">
+                  {publicComps.map(pc => (
+                    <div key={pc.id} className="bg-white rounded-xl border border-slate-200 px-4 py-2.5 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-900 truncate">{pc.name}</p>
+                        <p className="text-[11px] text-slate-400">
+                          {pc.scopeType === 'game' ? 'Single game' : pc.scopeType === 'round' ? `Round ${pc.scopeRound}` : 'Ongoing season'} · {pc.memberCount} in · buy-in {money(pc.buyIn)} · by {pc.creatorName}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => joinPublicMutation.mutate(pc.id)}
+                        disabled={joinPublicMutation.isPending}
+                        className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-bold flex-shrink-0"
+                      >
+                        Join
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* My comps */}
             {comps.length === 0 ? (
               <div className="bg-white rounded-2xl border border-slate-200 px-6 py-12 text-center text-slate-400 text-sm">
-                No comps yet — create one for tonight's game and share the code.
+                No comps yet — create one for tonight's game and share the code, or join a public comp above.
               </div>
             ) : (
               comps.map(comp => (
@@ -940,9 +1001,10 @@ export default function MultiPage() {
                       <p className="text-sm font-black text-slate-900 truncate">
                         {comp.name}
                         <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase align-middle ${comp.status === 'open' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{comp.status}</span>
+                        {comp.isPublic && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase align-middle bg-sky-100 text-sky-700">Public</span>}
                       </p>
                       <p className="text-[11px] text-slate-400">
-                        {comp.scopeType === 'game' ? 'Single game' : `Round ${comp.scopeRound}`} · {comp.memberCount} in · buy-in {money(comp.buyIn)} · budget {money(comp.startingBudget)}
+                        {comp.scopeType === 'game' ? 'Single game' : comp.scopeType === 'round' ? `Round ${comp.scopeRound}` : 'Ongoing season'} · {comp.memberCount} in · buy-in {money(comp.buyIn)} · budget {money(comp.startingBudget)}
                         {comp.minBet != null ? ` · min ${money(comp.minBet)}` : ''}{comp.maxBet != null ? ` · max ${money(comp.maxBet)}` : ''}
                         {comp.mustSpend ? ' · must spend' : ''} · {comp.payoutRule === 'podium' ? 'podium 50/30/20' : 'winner takes all'}
                       </p>

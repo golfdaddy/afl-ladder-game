@@ -16,7 +16,7 @@ function genJoinCode(): string {
 
 export interface CreateCompInput {
   name: string
-  scopeType: 'game' | 'round'
+  scopeType: 'game' | 'round' | 'season'
   scopeRound: number
   scopeGameId?: number | null
   buyIn?: number
@@ -25,13 +25,14 @@ export interface CreateCompInput {
   maxBet?: number | null
   mustSpend?: boolean
   payoutRule?: 'winner_takes_all' | 'podium'
+  isPublic?: boolean
 }
 
 export class MultiCompsModel {
   static async createComp(userId: number, seasonId: number, input: CreateCompInput) {
     const name = (input.name || '').trim()
     if (!name || name.length > 120) throw Object.assign(new Error('Comp needs a name (max 120 chars)'), { status: 400 })
-    if (input.scopeType !== 'game' && input.scopeType !== 'round') throw Object.assign(new Error('Scope must be a game or a round'), { status: 400 })
+    if (!['game', 'round', 'season'].includes(input.scopeType)) throw Object.assign(new Error('Scope must be a game, round or season'), { status: 400 })
     if (input.scopeType === 'game' && !input.scopeGameId) throw Object.assign(new Error('Pick the game for this comp'), { status: 400 })
     if (!Number.isFinite(input.scopeRound) || input.scopeRound < 0) throw Object.assign(new Error('Invalid round'), { status: 400 })
 
@@ -57,12 +58,12 @@ export class MultiCompsModel {
         joinCode = genJoinCode()
         const result = await client.query(
           `INSERT INTO multi_comps (season_id, creator_user_id, name, join_code, scope_type, scope_round, scope_game_id,
-                                    buy_in, starting_budget, min_bet, max_bet, must_spend, payout_rule)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                                    buy_in, starting_budget, min_bet, max_bet, must_spend, payout_rule, is_public)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
            ON CONFLICT (join_code) DO NOTHING
            RETURNING id`,
-          [seasonId, userId, name, joinCode, input.scopeType, input.scopeRound, input.scopeGameId || null,
-           buyIn, startingBudget, minBet, maxBet, !!input.mustSpend, payoutRule]
+          [seasonId, userId, name, joinCode, input.scopeType, input.scopeRound, input.scopeType === 'season' ? null : (input.scopeGameId || null),
+           buyIn, startingBudget, minBet, maxBet, !!input.mustSpend, payoutRule, !!input.isPublic]
         )
         if (result.rows.length > 0) compId = result.rows[0].id
       }
@@ -75,12 +76,29 @@ export class MultiCompsModel {
 
   static async joinComp(userId: number, seasonId: number, code: string) {
     const compResult = await db.query(
-      `SELECT id, season_id as "seasonId", buy_in as "buyIn", starting_budget as "startingBudget", status
+      `SELECT id, season_id as "seasonId", buy_in as "buyIn", starting_budget as "startingBudget", status, is_public as "isPublic"
        FROM multi_comps WHERE join_code = $1`,
       [(code || '').trim().toUpperCase()]
     )
     const comp = compResult.rows[0]
     if (!comp || comp.seasonId !== seasonId) throw Object.assign(new Error('Comp not found — check the code'), { status: 404 })
+    return this.joinResolvedComp(userId, seasonId, comp)
+  }
+
+  /** Join a public comp directly by id (no code needed). */
+  static async joinCompById(userId: number, seasonId: number, compId: number) {
+    const compResult = await db.query(
+      `SELECT id, season_id as "seasonId", buy_in as "buyIn", starting_budget as "startingBudget", status, is_public as "isPublic"
+       FROM multi_comps WHERE id = $1`,
+      [compId]
+    )
+    const comp = compResult.rows[0]
+    if (!comp || comp.seasonId !== seasonId) throw Object.assign(new Error('Comp not found'), { status: 404 })
+    if (!comp.isPublic) throw Object.assign(new Error('This comp is private — you need its join code'), { status: 403 })
+    return this.joinResolvedComp(userId, seasonId, comp)
+  }
+
+  private static async joinResolvedComp(userId: number, seasonId: number, comp: any) {
     if (comp.status !== 'open') throw Object.assign(new Error('This comp has finished'), { status: 400 })
 
     const existing = await db.query(`SELECT id FROM multi_comp_members WHERE comp_id = $1 AND user_id = $2`, [comp.id, userId])
@@ -95,6 +113,27 @@ export class MultiCompsModel {
       await this.addMember(client, comp.id, userId, account.id, account.balance, buyIn, num(comp.startingBudget))
       return { compId: comp.id }
     })
+  }
+
+  /** Open public comps in this season the user hasn't joined yet. */
+  static async listPublicComps(userId: number, seasonId: number) {
+    const result = await db.query(
+      `SELECT c.id, c.name, c.scope_type as "scopeType", c.scope_round as "scopeRound",
+              c.buy_in as "buyIn", c.starting_budget as "startingBudget", c.payout_rule as "payoutRule",
+              c.created_at as "createdAt",
+              (SELECT COUNT(*) FROM multi_comp_members WHERE comp_id = c.id)::int as "memberCount",
+              u.display_name as "creatorName"
+       FROM multi_comps c
+       JOIN users u ON u.id = c.creator_user_id
+       WHERE c.season_id = $1 AND c.is_public = true AND c.status = 'open'
+         AND NOT EXISTS (SELECT 1 FROM multi_comp_members m WHERE m.comp_id = c.id AND m.user_id = $2)
+       ORDER BY "memberCount" DESC, c.created_at DESC
+       LIMIT 50`,
+      [seasonId, userId]
+    )
+    return result.rows.map((r: any) => ({
+      ...r, buyIn: num(r.buyIn), startingBudget: num(r.startingBudget),
+    }))
   }
 
   private static async lockMainAccount(client: PoolClient, userId: number, seasonId: number) {
@@ -133,6 +172,7 @@ export class MultiCompsModel {
       `SELECT c.id, c.name, c.join_code as "joinCode", c.scope_type as "scopeType", c.scope_round as "scopeRound",
               c.scope_game_id as "scopeGameId", c.buy_in as "buyIn", c.starting_budget as "startingBudget",
               c.min_bet as "minBet", c.max_bet as "maxBet", c.must_spend as "mustSpend", c.payout_rule as "payoutRule",
+              c.is_public as "isPublic",
               c.status, c.creator_user_id as "creatorUserId", c.created_at as "createdAt",
               m.balance as "myBalance", m.total_staked as "myStaked", m.payout as "myPayout", m.final_rank as "myRank",
               (SELECT COUNT(*) FROM multi_comp_members WHERE comp_id = c.id)::int as "memberCount"
@@ -198,10 +238,13 @@ export class MultiCompsModel {
     if (!comp.memberId) throw Object.assign(new Error('Join the comp before betting in it'), { status: 403 })
     if (comp.status !== 'open') throw Object.assign(new Error('This comp has finished'), { status: 400 })
 
-    for (const leg of legs) {
-      const inScope = comp.scopeType === 'game' ? leg.gameId === comp.scopeGameId : leg.gameRound === comp.scopeRound
-      if (!inScope) {
-        throw Object.assign(new Error(comp.scopeType === 'game' ? 'This comp only covers its single game' : `This comp only covers Round ${comp.scopeRound}`), { status: 400 })
+    // Season comps cover every game; game/round comps restrict scope
+    if (comp.scopeType !== 'season') {
+      for (const leg of legs) {
+        const inScope = comp.scopeType === 'game' ? leg.gameId === comp.scopeGameId : leg.gameRound === comp.scopeRound
+        if (!inScope) {
+          throw Object.assign(new Error(comp.scopeType === 'game' ? 'This comp only covers its single game' : `This comp only covers Round ${comp.scopeRound}`), { status: 400 })
+        }
       }
     }
     if (comp.minBet != null && stake < num(comp.minBet)) {
@@ -234,6 +277,8 @@ export class MultiCompsModel {
 
     let finalized = 0
     for (const comp of open.rows) {
+      // Season comps run until the season ends — never auto-finalised here
+      if (comp.scopeType === 'season') continue
       const scopeDone = comp.scopeType === 'game'
         ? completedIds.has(comp.scopeGameId)
         : !roundsStillGoing.has(comp.scopeRound) && (completedRounds.get(comp.scopeRound) || 0) > 0
