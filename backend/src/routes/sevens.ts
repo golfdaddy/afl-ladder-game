@@ -13,4 +13,10 @@ router.get('/round', asyncHandler(SevensController.getRound))
 router.post('/team', asyncHandler(SevensController.saveTeam))
 router.get('/leaderboard', asyncHandler(SevensController.getLeaderboard))
 
+// Private competitions (leagues)
+router.get('/comps', asyncHandler(SevensController.myComps))
+router.post('/comps', asyncHandler(SevensController.createComp))
+router.post('/comps/join', asyncHandler(SevensController.joinComp))
+router.get('/comps/:id/leaderboard', asyncHandler(SevensController.compLeaderboard))
+
 export default router

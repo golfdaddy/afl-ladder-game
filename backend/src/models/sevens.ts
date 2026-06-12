@@ -6,7 +6,7 @@ import { SquiggleService } from '../services/squiggle'
 
 export const FORMATION: Record<string, number> = { BACK: 2, MID: 2, RUCK: 1, FWD: 2 }
 export const TEAM_SIZE = 7
-export const DEFAULT_BUDGET = 40 // Ƒ for 7 players — forces star-vs-spread choices
+export const DEFAULT_BUDGET = 45 // Ƒ for 7 players — forces star-vs-spread choices
 export const MAX_PRICE = 10
 const MIN_GAMES = 4              // games of form needed to be priced into the pool
 
@@ -473,7 +473,12 @@ export class SevensModel {
    * frequently on the client, so scores and the played count climb through the
    * week as each game finishes.
    */
-  static async getLeaderboard(sevensRoundId: number, year: number, round: number) {
+  static async getLeaderboard(sevensRoundId: number, year: number, round: number, userIds?: number[]) {
+    // Optional member filter scopes the board to a private competition.
+    if (userIds && userIds.length === 0) return []
+    const memberFilter = userIds ? `AND t.user_id = ANY($4)` : ''
+    const params: any[] = [sevensRoundId, year, round]
+    if (userIds) params.push(userIds)
     const result = await db.query(
       `SELECT t.user_id as "userId", u.display_name as "displayName", t.total_price as "totalPrice",
               tp.player_id as "playerId", tp.slot as "slot",
@@ -485,9 +490,9 @@ export class SevensModel {
        LEFT JOIN sevens_team_players tp ON tp.team_id = t.id
        LEFT JOIN sevens_player_pool pp ON pp.sevens_round_id = $1 AND pp.player_id = tp.player_id
        LEFT JOIN multi_player_stats s ON s.player_id = tp.player_id AND s.season_year = $2 AND s.round = $3
-       WHERE t.sevens_round_id = $1
+       WHERE t.sevens_round_id = $1 ${memberFilter}
        ORDER BY t.user_id`,
-      [sevensRoundId, year, round]
+      params
     )
 
     const teams = new Map<number, any>()
