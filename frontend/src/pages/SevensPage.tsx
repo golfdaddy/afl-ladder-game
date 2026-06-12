@@ -110,6 +110,7 @@ export default function SevensPage() {
   const [posFilter, setPosFilter] = useState<'ALL' | 'BACK' | 'MID' | 'RUCK' | 'FWD'>('ALL')
   const [priceFilter, setPriceFilter] = useState<number | 'ALL'>('ALL')
   const [sortBy, setSortBy] = useState<'price' | 'avg' | 'l5'>('price')
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
 
   const { data: roundData, dataUpdatedAt } = useQuery({
     queryKey: ['sevens', 'round'],
@@ -141,10 +142,12 @@ export default function SevensPage() {
     setInitialised(true)
   }
 
-  const { data: lbData } = useQuery({
+  const { data: lbData, dataUpdatedAt: lbUpdatedAt } = useQuery({
     queryKey: ['sevens', 'leaderboard'],
     queryFn: () => api.get('/sevens/leaderboard').then(r => r.data),
     enabled: view === 'leaderboard',
+    refetchInterval: 2 * 60 * 1000, // live: scores climb as games finish
+    refetchOnWindowFocus: true,
   })
   const leaderboard = lbData?.leaderboard || []
 
@@ -417,17 +420,50 @@ export default function SevensPage() {
                 <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
                   {leaderboard.map((row: any, idx: number) => {
                     const isMe = row.userId === user?.id
+                    const players: any[] = row.players || []
+                    const isOpen = expanded.has(row.userId)
+                    const toggle = () => setExpanded(prev => {
+                      const next = new Set(prev)
+                      next.has(row.userId) ? next.delete(row.userId) : next.add(row.userId)
+                      return next
+                    })
                     return (
-                      <div key={row.userId} className={`flex items-center gap-3 px-4 py-3 ${isMe ? 'bg-emerald-50/60' : ''}`}>
-                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-black flex-shrink-0 ${idx === 0 ? 'bg-amber-400 text-white' : 'bg-slate-100 text-slate-500'}`}>{idx + 1}</span>
-                        <span className={`flex-1 min-w-0 text-sm font-semibold truncate ${isMe ? 'text-emerald-800' : 'text-slate-900'}`}>{row.displayName}{isMe ? ' (you)' : ''}</span>
-                        <span className="w-14 text-center text-xs font-semibold text-slate-500">{row.played}/{row.teamSize || 7}</span>
-                        <span className="w-12 text-right text-sm font-black text-slate-900">{row.score}</span>
+                      <div key={row.userId} className={isMe ? 'bg-emerald-50/60' : ''}>
+                        <button onClick={toggle} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50/80 transition-colors">
+                          <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-black flex-shrink-0 ${idx === 0 ? 'bg-amber-400 text-white' : 'bg-slate-100 text-slate-500'}`}>{idx + 1}</span>
+                          <span className={`flex-1 min-w-0 text-sm font-semibold truncate ${isMe ? 'text-emerald-800' : 'text-slate-900'}`}>{row.displayName}{isMe ? ' (you)' : ''}</span>
+                          <span className="w-14 text-center text-xs font-semibold text-slate-500">{row.played}/{row.teamSize || 7}</span>
+                          <span className="w-12 text-right text-sm font-black text-slate-900">{row.score}</span>
+                          <span className={`flex-shrink-0 text-slate-300 text-xs transition-transform ${isOpen ? 'rotate-90' : ''}`}>▶</span>
+                        </button>
+                        {isOpen && (
+                          <div className="px-4 pb-3 pt-0.5 bg-slate-50/60">
+                            {players.length === 0 ? (
+                              <p className="text-xs text-slate-400 py-2">No games finished yet — scores show here once each player's match is done.</p>
+                            ) : (
+                              <ul className="divide-y divide-slate-100">
+                                {players.map((p: any) => (
+                                  <li key={p.playerId} className="flex items-center gap-2 py-1.5">
+                                    <span className="w-9 text-[10px] font-black text-slate-400 uppercase flex-shrink-0">{SLOT_SHORT[p.slot] || p.slot}</span>
+                                    <span className="flex-1 min-w-0 text-xs font-medium text-slate-700 truncate">{p.playerName}</span>
+                                    <span className="text-xs font-black text-emerald-600 tabular-nums">{p.points}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            {players.length > 0 && players.length < (row.teamSize || 7) && (
+                              <p className="text-[10px] text-slate-400 pt-1.5">{(row.teamSize || 7) - players.length} still to play — hidden until their game finishes.</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
                 </div>
-                <p className="text-[11px] text-slate-400 mt-2 px-1">Live fantasy score across your seven. "Played" = how many have had their game. Highest score wins the week.</p>
+                <p className="text-[11px] text-slate-400 mt-2 px-1">
+                  Live fantasy score across your seven. "Played" = how many have had their game; tap a row to see each finished player's score. Yet-to-play and in-progress players are hidden until their game ends. Updates automatically every couple of minutes.
+                  {lbUpdatedAt > 0 && <span className="text-slate-300"> · last updated {new Date(lbUpdatedAt).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })}</span>}
+                </p>
               </>
             )}
           </div>

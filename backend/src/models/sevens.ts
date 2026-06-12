@@ -465,28 +465,52 @@ export class SevensModel {
   }
 
   /**
-   * Live leaderboard: each team's running fantasy score and how many of their
-   * seven have played so far this round (scored live from ingested stats, so it
-   * updates through the week as games complete).
+   * Live leaderboard: each team's running fantasy score plus a per-player
+   * breakdown of who has played so far this round. Player stats are only
+   * ingested once a game CONCLUDES, so a player appears in `players` exactly
+   * when their game is done — players who haven't played yet or whose game is
+   * still in flight are absent (no score to show). The leaderboard is polled
+   * frequently on the client, so scores and the played count climb through the
+   * week as each game finishes.
    */
   static async getLeaderboard(sevensRoundId: number, year: number, round: number) {
     const result = await db.query(
       `SELECT t.user_id as "userId", u.display_name as "displayName", t.total_price as "totalPrice",
-              COUNT(s.id)::int as "played",
-              COUNT(tp.id)::int as "teamSize",
-              COALESCE(ROUND(SUM(s.dream_team_points), 1), 0)::float as "score"
+              tp.player_id as "playerId", tp.slot as "slot",
+              pp.player_name as "playerName", pp.team_internal as "team",
+              s.dream_team_points as "points",
+              (s.id IS NOT NULL) as "hasPlayed"
        FROM sevens_teams t
        JOIN users u ON u.id = t.user_id
        LEFT JOIN sevens_team_players tp ON tp.team_id = t.id
+       LEFT JOIN sevens_player_pool pp ON pp.sevens_round_id = $1 AND pp.player_id = tp.player_id
        LEFT JOIN multi_player_stats s ON s.player_id = tp.player_id AND s.season_year = $2 AND s.round = $3
        WHERE t.sevens_round_id = $1
-       GROUP BY t.user_id, u.display_name, t.total_price
-       ORDER BY "score" DESC, "played" DESC, t.total_price ASC`,
+       ORDER BY t.user_id`,
       [sevensRoundId, year, round]
     )
-    return result.rows.map((r: any) => ({
-      userId: r.userId, displayName: r.displayName,
-      totalPrice: num(r.totalPrice), played: r.played, teamSize: r.teamSize, score: num(r.score),
-    }))
+
+    const teams = new Map<number, any>()
+    for (const r of result.rows) {
+      let team = teams.get(r.userId)
+      if (!team) {
+        team = { userId: r.userId, displayName: r.displayName, totalPrice: num(r.totalPrice), teamSize: 0, played: 0, score: 0, players: [] as any[] }
+        teams.set(r.userId, team)
+      }
+      if (!r.playerId) continue // defensive: team with no players
+      team.teamSize++
+      if (r.hasPlayed) {
+        const pts = num(r.points)
+        team.played++
+        team.score += pts
+        // Only players whose game has finished are listed — in-flight and
+        // not-yet-played are intentionally hidden.
+        team.players.push({ playerId: r.playerId, playerName: r.playerName, slot: r.slot, team: r.team, points: pts })
+      }
+    }
+
+    return [...teams.values()]
+      .map(t => ({ ...t, score: Math.round(t.score * 10) / 10, players: t.players.sort((a: any, b: any) => b.points - a.points) }))
+      .sort((a, b) => b.score - a.score || b.played - a.played || a.totalPrice - b.totalPrice)
   }
 }
