@@ -26,6 +26,17 @@ const SQUIGGLE_TO_INTERNAL: Record<string, string> = {
   'Western Bulldogs':  'Western Bulldogs',
 }
 
+// Post-finals position adjustments, keyed by season year then internal team name.
+// The Squiggle standings feed reflects the home-and-away ladder, but our game's
+// scoring uses the post-finals order — teams listed here are pinned to the given
+// position and everyone else keeps their relative Squiggle order around them.
+const FINALS_POSITION_ADJUSTMENTS: Record<number, Record<string, number>> = {
+  2026: {
+    'Melbourne': 9,
+    'Collingwood': 10,
+  },
+}
+
 interface SquiggleStanding {
   name: string
   rank: number
@@ -128,6 +139,41 @@ interface SquiggleLadderResponse {
   }>
 }
 
+/**
+ * Re-seats the adjusted teams at their pinned positions, keeping every other
+ * team in its existing order. Positions are renumbered 1..N afterwards.
+ * Returns the ladder untouched if any adjusted team is missing (partial data).
+ */
+export function applyFinalsAdjustments(year: number, teams: SquiggleMappedTeam[]): SquiggleMappedTeam[] {
+  const adjustments = FINALS_POSITION_ADJUSTMENTS[year]
+  if (!adjustments) return teams
+
+  const pinned = Object.entries(adjustments).map(([teamName, position]) => ({
+    team: teams.find(t => t.teamName === teamName),
+    position,
+  }))
+  if (pinned.some(p => !p.team || p.position < 1 || p.position > teams.length)) {
+    console.warn(`[Squiggle] Finals adjustments for ${year} reference missing teams/positions — skipping`)
+    return teams
+  }
+
+  const rest = [...teams]
+    .sort((a, b) => a.position - b.position)
+    .filter(t => adjustments[t.teamName] === undefined)
+
+  const reordered: SquiggleMappedTeam[] = []
+  for (let pos = 1; pos <= teams.length; pos++) {
+    const pin = pinned.find(p => p.position === pos)
+    reordered.push(pin ? pin.team! : rest.shift()!)
+  }
+
+  console.log(
+    `[Squiggle] Applied post-finals adjustments for ${year}: ` +
+    Object.entries(adjustments).map(([t, p]) => `${t} → ${p}`).join(', ')
+  )
+  return reordered.map((t, idx) => ({ ...t, position: idx + 1 }))
+}
+
 export class SquiggleService {
   /**
    * Fetch current season standings from Squiggle API.
@@ -167,7 +213,7 @@ export class SquiggleService {
       console.warn(`[Squiggle] Only ${mapped.length} teams returned — season may not have started`)
     }
 
-    return mapped
+    return applyFinalsAdjustments(year, mapped)
   }
 
   /**
@@ -329,6 +375,44 @@ export class SquiggleService {
       ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
       winnerName: g.winner ? (SQUIGGLE_TO_INTERNAL[g.winner] || g.winner) : null,
     }))
+  }
+
+  /**
+   * Fetch ALL finals games for the year — played and upcoming — in date order.
+   * Used by the Finals Predictor to lock in real results and leave only the
+   * remaining games pickable. winnerName is null while a game is incomplete.
+   */
+  static async fetchFinalsGames(year: number): Promise<Array<{
+    id: number
+    round: number
+    roundname: string
+    hteamName: string
+    ateamName: string
+    complete: number
+    winnerName: string | null
+    date: string | null
+    venue: string | null
+  }>> {
+    const url = `${SQUIGGLE_BASE}/?q=games;year=${year}`
+    console.log(`[Squiggle] Fetching finals games: ${url}`)
+
+    const data = await fetchJson<SquiggleGamesResponse & { games: Array<{ winner: string | null }> }>(url)
+    if (!data.games || data.games.length === 0) return []
+
+    return (data.games as any[])
+      .filter(g => g.is_final)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+      .map(g => ({
+        id: g.id,
+        round: g.round,
+        roundname: g.roundname,
+        hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
+        ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
+        complete: g.complete,
+        winnerName: g.complete >= 100 && g.winner ? (SQUIGGLE_TO_INTERNAL[g.winner] || g.winner) : null,
+        date: g.date,
+        venue: g.venue,
+      }))
   }
 
   /** Returns the internal→squiggle name map for debugging */

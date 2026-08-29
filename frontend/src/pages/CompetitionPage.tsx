@@ -341,6 +341,14 @@ export default function CompetitionPage() {
     retry: false,
   })
 
+  // Real finals fixtures/results — locks played finals into the Finals Predictor
+  const { data: finalsGamesData } = useQuery({
+    queryKey: ['afl-finals-games'],
+    queryFn: () => api.get('/admin/afl-finals-games').then(r => r.data),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+
   const inviteMutation = useMutation({
     mutationFn: (email: string) =>
       api.post(`/competitions/${id}/invite`, { email }),
@@ -1018,7 +1026,7 @@ export default function CompetitionPage() {
                   {ladderView === 'ladder' && 'AFL ladder vs your prediction - lower is better'}
                   {ladderView === 'spotlight' && 'Select a team to see where everyone placed them'}
                   {ladderView === 'predictor' && 'Auto-predict using Squiggle model projections, or pick game results manually'}
-                  {ladderView === 'finals' && 'Simulate the AFL finals using projected model seedings — see who wins and what it means for scores'}
+                  {ladderView === 'finals' && 'Simulate the AFL finals — played games are locked in, pick the rest and see what it means for scores'}
                 </p>
               </div>
               <div className="flex-shrink-0 flex rounded-xl bg-slate-100 p-1 gap-1">
@@ -1701,15 +1709,17 @@ export default function CompetitionPage() {
             {/* ── FINALS TAB ── */}
             {ladderView === 'finals' && (
               <div>
-                {consensusData.length === 0 ? (
+                {consensusData.length === 0 && aflTeams.length === 0 ? (
                   <div className="px-6 py-12 text-center text-slate-400 text-sm">
-                    {projectedLoading ? 'Loading model projections…' : 'Projection data unavailable.'}
+                    {projectedLoading ? 'Loading ladder data…' : 'Ladder data unavailable.'}
                   </div>
                 ) : (
                   <FinalsPredictor
                     consensusLadder={consensusData}
                     predictions={memberPredictions}
                     currentUserId={currentUser?.id ?? null}
+                    actualLadder={aflTeams}
+                    finalsGames={finalsGamesData?.games || []}
                   />
                 )}
               </div>
