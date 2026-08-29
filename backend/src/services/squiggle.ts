@@ -26,6 +26,17 @@ const SQUIGGLE_TO_INTERNAL: Record<string, string> = {
   'Western Bulldogs':  'Western Bulldogs',
 }
 
+// Post-finals position adjustments, keyed by season year then internal team name.
+// The Squiggle standings feed reflects the home-and-away ladder, but our game's
+// scoring uses the post-finals order — teams listed here are pinned to the given
+// position and everyone else keeps their relative Squiggle order around them.
+const FINALS_POSITION_ADJUSTMENTS: Record<number, Record<string, number>> = {
+  2026: {
+    'Melbourne': 9,
+    'Collingwood': 10,
+  },
+}
+
 interface SquiggleStanding {
   name: string
   rank: number
@@ -128,6 +139,41 @@ interface SquiggleLadderResponse {
   }>
 }
 
+/**
+ * Re-seats the adjusted teams at their pinned positions, keeping every other
+ * team in its existing order. Positions are renumbered 1..N afterwards.
+ * Returns the ladder untouched if any adjusted team is missing (partial data).
+ */
+export function applyFinalsAdjustments(year: number, teams: SquiggleMappedTeam[]): SquiggleMappedTeam[] {
+  const adjustments = FINALS_POSITION_ADJUSTMENTS[year]
+  if (!adjustments) return teams
+
+  const pinned = Object.entries(adjustments).map(([teamName, position]) => ({
+    team: teams.find(t => t.teamName === teamName),
+    position,
+  }))
+  if (pinned.some(p => !p.team || p.position < 1 || p.position > teams.length)) {
+    console.warn(`[Squiggle] Finals adjustments for ${year} reference missing teams/positions — skipping`)
+    return teams
+  }
+
+  const rest = [...teams]
+    .sort((a, b) => a.position - b.position)
+    .filter(t => adjustments[t.teamName] === undefined)
+
+  const reordered: SquiggleMappedTeam[] = []
+  for (let pos = 1; pos <= teams.length; pos++) {
+    const pin = pinned.find(p => p.position === pos)
+    reordered.push(pin ? pin.team! : rest.shift()!)
+  }
+
+  console.log(
+    `[Squiggle] Applied post-finals adjustments for ${year}: ` +
+    Object.entries(adjustments).map(([t, p]) => `${t} → ${p}`).join(', ')
+  )
+  return reordered.map((t, idx) => ({ ...t, position: idx + 1 }))
+}
+
 export class SquiggleService {
   /**
    * Fetch current season standings from Squiggle API.
@@ -167,7 +213,7 @@ export class SquiggleService {
       console.warn(`[Squiggle] Only ${mapped.length} teams returned — season may not have started`)
     }
 
-    return mapped
+    return applyFinalsAdjustments(year, mapped)
   }
 
   /**
