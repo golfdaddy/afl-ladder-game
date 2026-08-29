@@ -154,6 +154,14 @@ export default function DashboardPage() {
     retry: false,
   })
 
+  // Real finals fixtures/results — locks played finals into the Finals Predictor
+  const { data: dashFinalsGamesData } = useQuery({
+    queryKey: ['afl-finals-games'],
+    queryFn: () => api.get('/admin/afl-finals-games').then(r => r.data),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+
   // AFL current ladder — sorted by position ascending → array of team names
   const aflTeams: string[] = (() => {
     const teams = aflLadderData?.ladder?.teams
@@ -1317,7 +1325,7 @@ export default function DashboardPage() {
                                 <div className="space-y-2">{[...Array(10)].map((_, i) => <div key={i} className="h-10 bg-slate-100 rounded-xl animate-pulse" />)}</div>
                               ) : dashProjectedTeamOrder.length === 0 ? (
                                 <div className="py-8 text-center text-slate-400 text-sm">
-                                  {dashAvailableModels.length === 0 ? 'Squiggle projections not yet available.' : 'Select a view above.'}
+                                  {dashAvailableModels.length === 0 ? 'Squiggle projections aren’t published during finals — head to the Finals tab to simulate the finish.' : 'Select a view above.'}
                                 </div>
                               ) : dashSelectedModel === 'consensus' ? (
                                 <>
@@ -1469,15 +1477,17 @@ export default function DashboardPage() {
               {/* ── FINALS TAB ── */}
               {dashView === 'finals' && (
                 <div>
-                  {dashConsensusData.length === 0 ? (
+                  {dashConsensusData.length === 0 && aflTeams.length === 0 ? (
                     <div className="px-5 py-12 text-center text-slate-400 text-sm">
-                      {dashProjectedLoading ? 'Loading model projections…' : 'Projection data unavailable.'}
+                      {dashProjectedLoading ? 'Loading ladder data…' : 'Ladder data unavailable.'}
                     </div>
                   ) : (
                     <FinalsPredictor
                       consensusLadder={dashConsensusData}
                       predictions={spotlightPredictions as MemberPrediction[]}
                       currentUserId={user?.id ?? null}
+                      actualLadder={aflTeams}
+                      finalsGames={dashFinalsGamesData?.games || []}
                     />
                   )}
                 </div>

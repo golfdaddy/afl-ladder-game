@@ -1476,7 +1476,7 @@ export default function CompetitionPage() {
                             ) : projectedTeamOrder.length === 0 ? (
                               <div className="py-12 text-center text-slate-400 text-sm">
                                 {availableModels.length === 0
-                                  ? 'Squiggle projections not yet available for this season.'
+                                  ? 'Squiggle projections aren’t published during finals — head to the Finals tab to simulate the finish.'
                                   : 'Select a view above.'}
                               </div>
                             ) : selectedModel === 'consensus' ? (
