@@ -138,6 +138,18 @@ export class AdminController {
     }
   }
 
+  /** Proxy: Squiggle finals games, played and upcoming — public */
+  static async getFinalsGames(req: Request, res: Response) {
+    try {
+      const year = parseInt(req.query.year as string) || new Date().getFullYear()
+      const games = await SquiggleService.fetchFinalsGames(year)
+      res.json({ games, year })
+    } catch (error: any) {
+      console.error('[Admin] getFinalsGames error:', error.message)
+      res.status(500).json({ error: 'Failed to fetch finals games from Squiggle' })
+    }
+  }
+
   /** Proxy: Squiggle all upcoming regular-season rounds — public */
   static async getAllUpcomingRounds(req: Request, res: Response) {
     try {

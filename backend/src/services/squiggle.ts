@@ -377,6 +377,44 @@ export class SquiggleService {
     }))
   }
 
+  /**
+   * Fetch ALL finals games for the year — played and upcoming — in date order.
+   * Used by the Finals Predictor to lock in real results and leave only the
+   * remaining games pickable. winnerName is null while a game is incomplete.
+   */
+  static async fetchFinalsGames(year: number): Promise<Array<{
+    id: number
+    round: number
+    roundname: string
+    hteamName: string
+    ateamName: string
+    complete: number
+    winnerName: string | null
+    date: string | null
+    venue: string | null
+  }>> {
+    const url = `${SQUIGGLE_BASE}/?q=games;year=${year}`
+    console.log(`[Squiggle] Fetching finals games: ${url}`)
+
+    const data = await fetchJson<SquiggleGamesResponse & { games: Array<{ winner: string | null }> }>(url)
+    if (!data.games || data.games.length === 0) return []
+
+    return (data.games as any[])
+      .filter(g => g.is_final)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+      .map(g => ({
+        id: g.id,
+        round: g.round,
+        roundname: g.roundname,
+        hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
+        ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
+        complete: g.complete,
+        winnerName: g.complete >= 100 && g.winner ? (SQUIGGLE_TO_INTERNAL[g.winner] || g.winner) : null,
+        date: g.date,
+        venue: g.venue,
+      }))
+  }
+
   /** Returns the internal→squiggle name map for debugging */
   static getTeamMap(): Record<string, string> {
     return SQUIGGLE_TO_INTERNAL
