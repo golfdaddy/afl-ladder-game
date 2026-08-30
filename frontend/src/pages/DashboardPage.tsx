@@ -991,7 +991,7 @@ export default function DashboardPage() {
                     {dashView === 'finals' && 'Simulate the AFL finals using projected model seedings — see who wins and what it means for scores'}
                   </p>
                 </div>
-                <div className="flex-shrink-0 flex rounded-xl bg-slate-100 p-1 gap-1">
+                <div className="flex-shrink-0 flex flex-wrap max-w-full rounded-xl bg-slate-100 p-1 gap-1">
                   {(['compare', 'spotlight', 'leaderboard', 'predictor', 'finals'] as const).map(tab => (
                     <button
                       key={tab}
@@ -1325,7 +1325,17 @@ export default function DashboardPage() {
                                 <div className="space-y-2">{[...Array(10)].map((_, i) => <div key={i} className="h-10 bg-slate-100 rounded-xl animate-pulse" />)}</div>
                               ) : dashProjectedTeamOrder.length === 0 ? (
                                 <div className="py-8 text-center text-slate-400 text-sm">
-                                  {dashAvailableModels.length === 0 ? 'Squiggle projections aren’t published during finals — head to the Finals tab to simulate the finish.' : 'Select a view above.'}
+                                  {dashAvailableModels.length === 0 ? (
+                                    <>
+                                      <p>Squiggle projections aren’t published during finals.</p>
+                                      <button
+                                        onClick={() => setDashView('finals')}
+                                        className="mt-3 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-700 transition-colors"
+                                      >
+                                        Open the Finals predictor →
+                                      </button>
+                                    </>
+                                  ) : 'Select a view above.'}
                                 </div>
                               ) : dashSelectedModel === 'consensus' ? (
                                 <>
