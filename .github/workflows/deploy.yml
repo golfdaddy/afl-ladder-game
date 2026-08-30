@@ -3,6 +3,7 @@ name: Deploy
 on:
   push:
     branches: [main, develop]
+  workflow_dispatch:
 
 jobs:
   # ─── Sandbox Deploy (develop branch) ────────────────────────────────────────
@@ -51,7 +52,10 @@ jobs:
   # ─── Production Deploy (main branch) ────────────────────────────────────────
   deploy-frontend:
     name: Deploy Frontend to Vercel (Production)
-    if: github.ref == 'refs/heads/main' && vars.ENABLE_GITHUB_VERCEL_DEPLOY == 'true'
+    # On by default — the Vercel git integration stopped deploying, so Actions is
+    # the frontend deploy path. Set DISABLE_GITHUB_VERCEL_DEPLOY=true to turn off
+    # (e.g. if the git integration is reconnected and deploys would duplicate).
+    if: github.ref == 'refs/heads/main' && vars.DISABLE_GITHUB_VERCEL_DEPLOY != 'true'
     runs-on: ubuntu-latest
 
     steps:
