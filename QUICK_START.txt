@@ -117,6 +117,44 @@ Configuration:
   - Docker: docker-compose.yml
 
 ================================================================================
+                        SANDBOX ENVIRONMENT
+================================================================================
+
+The project has two environments: SANDBOX (testing) and PRODUCTION (live).
+All changes should be tested in sandbox before going to production.
+
+Sandbox Setup:
+  1. Start sandbox database:
+     docker-compose up -d postgres-sandbox
+
+  2. Backend sandbox (Terminal 1):
+     cd backend
+     cp .env.sandbox .env
+     npm run dev
+     → Runs on http://localhost:3001
+
+  3. Frontend sandbox (Terminal 2):
+     cd frontend
+     cp .env.sandbox .env.local
+     npm run dev -- --port 5174
+     → Runs on http://localhost:5174
+
+Production Setup:
+  - Backend uses .env.production template (set secrets in Railway)
+  - Frontend env vars set in Vercel dashboard
+  - Deploy: merge develop → main
+
+Branch Workflow:
+  develop    → Sandbox (auto-deploy if ENABLE_SANDBOX_DEPLOY=true)
+  main       → Production (auto-deploy)
+  sandbox/*  → CI runs, no deploy
+
+Sandbox Ports:        Production Ports:
+  Backend:  3001        Backend:  3000
+  Postgres: 5433        Postgres: 5432
+  Frontend: 5174        Frontend: 5173
+
+================================================================================
                          USEFUL COMMANDS
 ================================================================================
 
@@ -132,14 +170,17 @@ Frontend:
   npm run preview    - Preview production build
 
 Docker:
-  docker-compose up -d      - Start containers
-  docker-compose down       - Stop containers
-  docker-compose logs       - View logs
-  docker-compose ps         - Check status
+  docker-compose up -d                  - Start all containers
+  docker-compose up -d postgres-sandbox - Start sandbox DB only
+  docker-compose down                   - Stop containers
+  docker-compose logs                   - View logs
+  docker-compose ps                     - Check status
 
 Testing:
-  curl http://localhost:3000/api/health      - Check backend
-  curl http://localhost:5173                 - Check frontend
+  curl http://localhost:3000/api/health      - Check production backend
+  curl http://localhost:3001/api/health      - Check sandbox backend
+  curl http://localhost:5173                 - Check production frontend
+  curl http://localhost:5174                 - Check sandbox frontend
 
 ================================================================================
                            NEXT STEPS

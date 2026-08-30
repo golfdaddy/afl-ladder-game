@@ -64,4 +64,36 @@ export class EmailGroupModel {
     )
     return result.rows.map((r) => r.user_id)
   }
+
+  /** Replace a user's mailing-list subscriptions with the provided group IDs */
+  static async setUserGroupIds(userId: number, groupIds: number[]): Promise<number[]> {
+    const uniqueGroupIds = Array.from(
+      new Set(groupIds.filter((groupId) => Number.isInteger(groupId) && groupId > 0))
+    )
+
+    return db.transaction(async (client) => {
+      const validIdsResult = uniqueGroupIds.length
+        ? await client.query(
+            `SELECT id
+             FROM email_groups
+             WHERE id = ANY($1::int[])`,
+            [uniqueGroupIds]
+          )
+        : { rows: [] as Array<{ id: number }> }
+
+      const validGroupIds = validIdsResult.rows.map((row) => Number(row.id))
+
+      await client.query(`DELETE FROM email_group_members WHERE user_id = $1`, [userId])
+
+      if (validGroupIds.length > 0) {
+        await client.query(
+          `INSERT INTO email_group_members (group_id, user_id)
+           SELECT UNNEST($1::int[]), $2`,
+          [validGroupIds, userId]
+        )
+      }
+
+      return validGroupIds
+    })
+  }
 }

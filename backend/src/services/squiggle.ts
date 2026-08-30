@@ -6,6 +6,7 @@ const SQUIGGLE_BASE = 'https://api.squiggle.com.au'
 const SQUIGGLE_TO_INTERNAL: Record<string, string> = {
   'Adelaide':          'Adelaide Crows',
   'Brisbane':          'Brisbane Lions',
+  'Brisbane Lions':    'Brisbane Lions',
   'Carlton':           'Carlton',
   'Collingwood':       'Collingwood',
   'Essendon':          'Essendon',
@@ -23,6 +24,17 @@ const SQUIGGLE_TO_INTERNAL: Record<string, string> = {
   'Sydney':            'Sydney Swans',
   'West Coast':        'West Coast Eagles',
   'Western Bulldogs':  'Western Bulldogs',
+}
+
+// Post-finals position adjustments, keyed by season year then internal team name.
+// The Squiggle standings feed reflects the home-and-away ladder, but our game's
+// scoring uses the post-finals order — teams listed here are pinned to the given
+// position and everyone else keeps their relative Squiggle order around them.
+const FINALS_POSITION_ADJUSTMENTS: Record<number, Record<string, number>> = {
+  2026: {
+    'Melbourne': 9,
+    'Collingwood': 10,
+  },
 }
 
 interface SquiggleStanding {
@@ -76,6 +88,92 @@ export interface SquiggleMappedTeam {
   percentage: number
 }
 
+export interface SquiggleGame {
+  id: number
+  round: number
+  roundname: string
+  hteam: string     // home team (Squiggle name)
+  ateam: string     // away team (Squiggle name)
+  hteamName: string // home team (internal name)
+  ateamName: string // away team (internal name)
+  complete: number  // 0 = upcoming, 100 = complete
+  date: string | null
+  venue: string | null
+  hprob: number | null // Squiggle win probability for home team
+  is_final: number | null
+}
+
+export interface SquiggleProjectedTeam {
+  teamName: string    // internal name
+  source: string      // model name e.g. 'squiggle', 'matterofstats'
+  rank: number        // projected final rank
+  projWins: number    // projected wins
+  swarms: number[]    // probability distribution over positions 1–18
+}
+
+interface SquiggleGamesResponse {
+  games: Array<{
+    id: number
+    round: number
+    roundname: string
+    hteam: string
+    ateam: string
+    hscore: number | null
+    ascore: number | null
+    winner: string
+    complete: number
+    date: string | null
+    venue: string | null
+    hprob: number | null
+    is_final: number | null
+  }>
+}
+
+interface SquiggleLadderResponse {
+  ladder: Array<{
+    team: string
+    source: string
+    rank: number
+    wins: number
+    swarms: number[]
+  }>
+}
+
+/**
+ * Re-seats the adjusted teams at their pinned positions, keeping every other
+ * team in its existing order. Positions are renumbered 1..N afterwards.
+ * Returns the ladder untouched if any adjusted team is missing (partial data).
+ */
+export function applyFinalsAdjustments(year: number, teams: SquiggleMappedTeam[]): SquiggleMappedTeam[] {
+  const adjustments = FINALS_POSITION_ADJUSTMENTS[year]
+  if (!adjustments) return teams
+
+  const pinned = Object.entries(adjustments).map(([teamName, position]) => ({
+    team: teams.find(t => t.teamName === teamName),
+    position,
+  }))
+  if (pinned.some(p => !p.team || p.position < 1 || p.position > teams.length)) {
+    console.warn(`[Squiggle] Finals adjustments for ${year} reference missing teams/positions — skipping`)
+    return teams
+  }
+
+  const rest = [...teams]
+    .sort((a, b) => a.position - b.position)
+    .filter(t => adjustments[t.teamName] === undefined)
+
+  const reordered: SquiggleMappedTeam[] = []
+  for (let pos = 1; pos <= teams.length; pos++) {
+    const pin = pinned.find(p => p.position === pos)
+    reordered.push(pin ? pin.team! : rest.shift()!)
+  }
+
+  console.log(
+    `[Squiggle] Applied post-finals adjustments for ${year}: ` +
+    Object.entries(adjustments).map(([t, p]) => `${t} → ${p}`).join(', ')
+  )
+  return reordered.map((t, idx) => ({ ...t, position: idx + 1 }))
+}
+
 export class SquiggleService {
   /**
    * Fetch current season standings from Squiggle API.
@@ -115,7 +213,206 @@ export class SquiggleService {
       console.warn(`[Squiggle] Only ${mapped.length} teams returned — season may not have started`)
     }
 
-    return mapped
+    return applyFinalsAdjustments(year, mapped)
+  }
+
+  /**
+   * Fetch upcoming (incomplete) games for the current round from Squiggle.
+   * Returns the current-round games that haven't been played yet.
+   */
+  static async fetchUpcomingGames(year: number): Promise<SquiggleGame[]> {
+    // Fetch all incomplete games for the year
+    const url = `${SQUIGGLE_BASE}/?q=games;year=${year};complete=0`
+    console.log(`[Squiggle] Fetching upcoming games: ${url}`)
+
+    const data = await fetchJson<SquiggleGamesResponse>(url)
+
+    if (!data.games || data.games.length === 0) {
+      console.warn(`[Squiggle] No upcoming games for ${year}`)
+      return []
+    }
+
+    // Group by round, return only the nearest upcoming round
+    const rounds = [...new Set(data.games.map(g => g.round))].sort((a, b) => a - b)
+    const nearestRound = rounds[0]
+    const roundGames = data.games.filter(g => g.round === nearestRound)
+
+    return roundGames.map(g => ({
+      id: g.id,
+      round: g.round,
+      roundname: g.roundname,
+      hteam: g.hteam,
+      ateam: g.ateam,
+      hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
+      ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
+      complete: g.complete,
+      date: g.date,
+      venue: g.venue,
+      hprob: g.hprob,
+      is_final: g.is_final,
+    }))
+  }
+
+  /**
+   * Fetch projected final ladder positions from Squiggle's model suite.
+   * Returns projections grouped by source model.
+   */
+  static async fetchProjectedLadder(year: number): Promise<SquiggleProjectedTeam[]> {
+    const url = `${SQUIGGLE_BASE}/?q=ladder;year=${year}`
+    console.log(`[Squiggle] Fetching projected ladder: ${url}`)
+
+    const data = await fetchJson<SquiggleLadderResponse>(url)
+
+    if (!data.ladder || data.ladder.length === 0) {
+      console.warn(`[Squiggle] No projected ladder data for ${year}`)
+      return []
+    }
+
+    return data.ladder.map(entry => ({
+      teamName: SQUIGGLE_TO_INTERNAL[entry.team] || entry.team,
+      source: entry.source,
+      rank: entry.rank,
+      projWins: Math.round(entry.wins * 10) / 10,
+      swarms: entry.swarms || [],
+    }))
+  }
+
+  /**
+   * Fetch ALL incomplete regular-season games for the year, grouped by round.
+   * Finals rounds (is_final = 1) are excluded.
+   */
+  static async fetchAllUpcomingRounds(year: number): Promise<{ round: number; roundname: string; games: SquiggleGame[] }[]> {
+    const url = `${SQUIGGLE_BASE}/?q=games;year=${year};complete=0`
+    console.log(`[Squiggle] Fetching all upcoming rounds: ${url}`)
+
+    const data = await fetchJson<SquiggleGamesResponse>(url)
+    if (!data.games || data.games.length === 0) return []
+
+    // Only regular-season games (not finals)
+    const regularGames = data.games.filter(g => !g.is_final)
+    const roundNums = [...new Set(regularGames.map(g => g.round))].sort((a, b) => a - b)
+
+    return roundNums.map(round => {
+      const roundGames = regularGames.filter(g => g.round === round)
+      return {
+        round,
+        roundname: roundGames[0].roundname,
+        games: roundGames.map(g => ({
+          id: g.id,
+          round: g.round,
+          roundname: g.roundname,
+          hteam: g.hteam,
+          ateam: g.ateam,
+          hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
+          ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
+          complete: g.complete,
+          date: g.date,
+          venue: g.venue,
+          hprob: g.hprob ?? (g as any).hconfidence ?? null,
+          is_final: g.is_final,
+        })),
+      }
+    })
+  }
+
+  // 5-minute cache so markets/bet placement don't hammer Squiggle's tips endpoint
+  private static tipsCache: { year: number; fetchedAt: number; probs: Map<number, number> } | null = null
+
+  /**
+   * Home-team win probabilities (0–100) per game id, from Squiggle model tips.
+   * Uses the 'Aggregate' source when present, otherwise the mean of all models.
+   */
+  static async fetchHomeProbabilities(year: number): Promise<Map<number, number>> {
+    const now = Date.now()
+    if (this.tipsCache && this.tipsCache.year === year && now - this.tipsCache.fetchedAt < 5 * 60 * 1000) {
+      return this.tipsCache.probs
+    }
+
+    const url = `${SQUIGGLE_BASE}/?q=tips;year=${year}`
+    console.log(`[Squiggle] Fetching tips for ${year}: ${url}`)
+    const data = await fetchJson<{ tips: Array<{ gameid: number; source: string; hconfidence: string | number | null }> }>(url)
+
+    const sums = new Map<number, { sum: number; count: number; aggregate: number | null }>()
+    for (const tip of data.tips || []) {
+      const h = tip.hconfidence == null ? null : Number(tip.hconfidence)
+      if (h == null || Number.isNaN(h)) continue
+      const entry = sums.get(tip.gameid) || { sum: 0, count: 0, aggregate: null }
+      entry.sum += h
+      entry.count++
+      if (tip.source === 'Aggregate') entry.aggregate = h
+      sums.set(tip.gameid, entry)
+    }
+
+    const probs = new Map<number, number>()
+    for (const [gameId, entry] of sums) {
+      probs.set(gameId, entry.aggregate ?? entry.sum / entry.count)
+    }
+    this.tipsCache = { year, fetchedAt: now, probs }
+    return probs
+  }
+
+  /**
+   * Fetch completed games for the year — used to settle Multi bets.
+   * winnerName is null for a draw.
+   */
+  static async fetchCompletedGames(year: number): Promise<Array<{
+    id: number
+    round: number
+    hteamName: string
+    ateamName: string
+    winnerName: string | null
+  }>> {
+    const url = `${SQUIGGLE_BASE}/?q=games;year=${year};complete=100`
+    console.log(`[Squiggle] Fetching completed games: ${url}`)
+
+    const data = await fetchJson<SquiggleGamesResponse & { games: Array<{ winner: string | null }> }>(url)
+    if (!data.games || data.games.length === 0) return []
+
+    return (data.games as any[]).map(g => ({
+      id: g.id,
+      round: g.round,
+      hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
+      ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
+      winnerName: g.winner ? (SQUIGGLE_TO_INTERNAL[g.winner] || g.winner) : null,
+    }))
+  }
+
+  /**
+   * Fetch ALL finals games for the year — played and upcoming — in date order.
+   * Used by the Finals Predictor to lock in real results and leave only the
+   * remaining games pickable. winnerName is null while a game is incomplete.
+   */
+  static async fetchFinalsGames(year: number): Promise<Array<{
+    id: number
+    round: number
+    roundname: string
+    hteamName: string
+    ateamName: string
+    complete: number
+    winnerName: string | null
+    date: string | null
+    venue: string | null
+  }>> {
+    const url = `${SQUIGGLE_BASE}/?q=games;year=${year}`
+    console.log(`[Squiggle] Fetching finals games: ${url}`)
+
+    const data = await fetchJson<SquiggleGamesResponse & { games: Array<{ winner: string | null }> }>(url)
+    if (!data.games || data.games.length === 0) return []
+
+    return (data.games as any[])
+      .filter(g => g.is_final)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+      .map(g => ({
+        id: g.id,
+        round: g.round,
+        roundname: g.roundname,
+        hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
+        ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
+        complete: g.complete,
+        winnerName: g.complete >= 100 && g.winner ? (SQUIGGLE_TO_INTERNAL[g.winner] || g.winner) : null,
+        date: g.date,
+        venue: g.venue,
+      }))
   }
 
   /** Returns the internal→squiggle name map for debugging */

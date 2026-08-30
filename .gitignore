@@ -9,12 +9,14 @@ build/
 out/
 .next/
 
-# Environment files — NEVER commit these
+# Environment files — NEVER commit real secrets
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+.env.sandbox.local
+.env.production.secrets
 
 # OS
 .DS_Store
