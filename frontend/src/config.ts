@@ -38,6 +38,10 @@ export const COMPETITION_LOCKED = LOCK_OVERRIDE === 'true'
 // SEASON_OVER: 2 weeks after the grand final — join/create leagues re-appear for next season.
 export const SEASON_OVER = _now >= _seasonEnd
 
+// SEASON_COMPLETE: the grand final has been played — final results (champion,
+// wooden spoon) can be celebrated on leaderboards.
+export const SEASON_COMPLETE = _now >= GRAND_FINAL
+
 export const FEATURE_FANTASY7_ENABLED = import.meta.env.VITE_FEATURE_FANTASY7_ENABLED === 'true'
 
 // MULTI_ONLY builds serve ONLY the Multi app (its own domain, own branding).

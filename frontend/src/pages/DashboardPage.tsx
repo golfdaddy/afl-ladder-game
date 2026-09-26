@@ -9,7 +9,8 @@ import {
 } from '../utils/aflTeams'
 import FullSeasonSimulator from '../components/FullSeasonSimulator'
 import FinalsPredictor from '../components/FinalsPredictor'
-import { SEASON_OVER, FEATURE_FANTASY7_ENABLED } from '../config'
+import SeasonHonours from '../components/SeasonHonours'
+import { SEASON_OVER, SEASON_COMPLETE, FEATURE_FANTASY7_ENABLED } from '../config'
 import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 function useCountdown(target: Date) {
@@ -1236,10 +1237,17 @@ export default function DashboardPage() {
                   {spotlightLeaderboard.length === 0 ? (
                     <div className="px-5 py-12 text-center text-slate-400 text-sm">Scores will appear once the AFL season starts.</div>
                   ) : (
+                    <>
+                    {SEASON_COMPLETE && (
+                      <div className="px-5 pt-4">
+                        <SeasonHonours entries={spotlightLeaderboard} currentUserId={user?.id ?? null} />
+                      </div>
+                    )}
                     <div className="divide-y divide-slate-50">
                       {spotlightLeaderboard.map((entry, idx) => {
                         const isMe = entry.userId === user?.id
-                        const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null
+                        const isSpoon = SEASON_COMPLETE && spotlightLeaderboard.length >= 2 && entry.totalPoints === spotlightLeaderboard[spotlightLeaderboard.length - 1].totalPoints && entry.totalPoints !== spotlightLeaderboard[0].totalPoints
+                        const medal = SEASON_COMPLETE && idx === 0 ? '🏆' : idx === 0 ? '🥇' : isSpoon ? '🥄' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null
                         return (
                           <div key={entry.userId} className={`flex items-center gap-3 px-5 py-3 ${isMe ? 'bg-emerald-50/60' : 'hover:bg-slate-50'} transition-colors`}>
                             <div className="w-7 text-center flex-shrink-0">
@@ -1259,6 +1267,7 @@ export default function DashboardPage() {
                         )
                       })}
                     </div>
+                    </>
                   )}
                   <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 text-xs text-slate-400 text-center">Lower score = better prediction</div>
                 </div>
