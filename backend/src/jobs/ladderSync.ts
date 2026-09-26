@@ -1,6 +1,15 @@
 import { SquiggleService } from '../services/squiggle'
 import { AFLLadderModel } from '../models/aflLadder'
-import { db } from '../db'
+import { SeasonModel } from '../models/season'
+import { ScoreModel } from '../models/score'
+
+function getMelbourneYear(): number {
+  const formatter = new Intl.DateTimeFormat('en-AU', {
+    timeZone: process.env.APP_TIMEZONE || 'Australia/Melbourne',
+    year: 'numeric',
+  })
+  return Number(formatter.format(new Date()))
+}
 
 /**
  * Syncs the AFL ladder from the Squiggle API for the current season.
@@ -8,20 +17,16 @@ import { db } from '../db'
  * - Never throws — a failed sync must not crash the server.
  */
 export async function syncLadderFromSquiggle(): Promise<void> {
-  const year = new Date().getFullYear()
   try {
+    const currentSeason = await SeasonModel.getCurrentSeason()
+    const year = currentSeason?.year || getMelbourneYear()
     console.log(`[LadderSync] Starting sync for ${year}...`)
 
-    // Look up the season id for this year
-    const seasonResult = await db.query(
-      'SELECT id FROM seasons WHERE year = $1',
-      [year]
-    )
-    if (seasonResult.rows.length === 0) {
-      console.log(`[LadderSync] No season found for year ${year} — skipping`)
+    const seasonId = currentSeason?.id
+    if (!seasonId) {
+      console.log(`[LadderSync] No active season found for year ${year} — skipping`)
       return
     }
-    const seasonId = seasonResult.rows[0].id
 
     // Fetch standings from Squiggle
     const teams = await SquiggleService.fetchStandings(year)
@@ -40,6 +45,10 @@ export async function syncLadderFromSquiggle(): Promise<void> {
     // Upload the new snapshot (null round = "latest auto-sync")
     await AFLLadderModel.uploadLadder(seasonId, teams, null, `squiggle-auto-${year}`)
     console.log(`[LadderSync] ✓ Successfully synced ${teams.length} teams for season ${year}`)
+
+    // Recalculate competition scores against the fresh ladder
+    await ScoreModel.calculateAndUpdateScores(seasonId)
+    console.log(`[LadderSync] ✓ Scores recalculated for season ${year}`)
   } catch (error: any) {
     // Log but do NOT re-throw — a failed sync must never crash the running server
     console.error(`[LadderSync] Failed to sync ladder:`, error.message)

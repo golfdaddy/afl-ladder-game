@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # ─── Production Database ──────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: afl_ladder_postgres
@@ -12,6 +13,24 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U afl_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Sandbox Database ─────────────────────────────────────────────────────────
+  postgres-sandbox:
+    image: postgres:16-alpine
+    container_name: afl_ladder_postgres_sandbox
+    environment:
+      POSTGRES_USER: afl_user
+      POSTGRES_PASSWORD: afl_password
+      POSTGRES_DB: afl_ladder_sandbox
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_sandbox_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U afl_user"]
       interval: 10s
@@ -31,3 +50,4 @@ services:
 
 volumes:
   postgres_data:
+  postgres_sandbox_data:

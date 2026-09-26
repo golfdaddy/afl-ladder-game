@@ -5,6 +5,7 @@ import { registerSchema, loginSchema, RegisterInput, LoginInput } from '../schem
 import { UserModel } from '../models/user'
 import { generateToken, generateVerificationToken } from '../utils/jwt'
 import { sendPasswordResetEmail } from '../services/email'
+import { EmailGroupModel } from '../models/emailGroup'
 
 export class AuthController {
   static async register(req: AuthRequest, res: Response) {
@@ -179,5 +180,32 @@ export class AuthController {
       console.error('Reset password error:', error)
       res.status(500).json({ error: 'Failed to reset password' })
     }
+  }
+
+  /** Get current user's mailing-list preferences */
+  static async getEmailPreferences(req: AuthRequest, res: Response) {
+    if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+
+    const [groups, subscribedGroupIds] = await Promise.all([
+      EmailGroupModel.listGroups(),
+      EmailGroupModel.getUserGroupIds(req.userId),
+    ])
+
+    res.json({ groups, subscribedGroupIds })
+  }
+
+  /** Replace current user's mailing-list preferences */
+  static async updateEmailPreferences(req: AuthRequest, res: Response) {
+    if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+
+    const groupIdsRaw = Array.isArray(req.body?.groupIds) ? req.body.groupIds : []
+    const groupIds = groupIdsRaw
+      .map((groupId: unknown) => Number(groupId))
+      .filter((groupId: number) => Number.isInteger(groupId) && groupId > 0)
+
+    const subscribedGroupIds = await EmailGroupModel.setUserGroupIds(req.userId, groupIds)
+    const groups = await EmailGroupModel.listGroups()
+
+    res.json({ groups, subscribedGroupIds })
   }
 }

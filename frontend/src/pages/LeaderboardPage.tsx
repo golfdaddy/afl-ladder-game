@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import api from '../services/api'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 interface Competition {
   id: number
@@ -20,6 +21,7 @@ const medalColors = [
 
 export default function LeaderboardPage() {
   const navigate = useNavigate()
+  const { seasonId } = useCurrentSeason()
 
   const { data: competitions = [], isLoading: compsLoading } = useQuery({
     queryKey: ['competitions'],
@@ -30,11 +32,12 @@ export default function LeaderboardPage() {
   })
 
   const { data: globalData = [], isLoading: globalLoading } = useQuery({
-    queryKey: ['leaderboard', 'global', '1'],
+    queryKey: ['leaderboard', 'global', seasonId],
     queryFn: async () => {
-      const response = await api.get('/leaderboards/global/1')
+      const response = await api.get(`/leaderboards/global/${seasonId}`)
       return response.data.leaderboard || []
-    }
+    },
+    enabled: seasonId > 0,
   })
 
   return (
@@ -186,11 +189,23 @@ export default function LeaderboardPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-slate-900 truncate">{item.displayName}</p>
-                    <p className="text-sm text-slate-400">{item.competitionCount} competition{item.competitionCount !== 1 ? 's' : ''}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {item.competitionCount === 0 ? (
+                        <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">Solo</span>
+                      ) : (
+                        <span className="text-xs text-slate-400">{item.competitionCount} competition{item.competitionCount !== 1 ? 's' : ''}</span>
+                      )}
+                    </div>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="text-2xl font-black text-slate-900">{item.totalPoints}</p>
-                    <p className="text-xs text-slate-400">avg {(Number(item.avgPoints) || 0).toFixed(1)}</p>
+                    {item.totalPoints != null ? (
+                      <>
+                        <p className="text-2xl font-black text-slate-900">{item.totalPoints}</p>
+                        <p className="text-xs text-slate-400">pts</p>
+                      </>
+                    ) : (
+                      <p className="text-sm font-semibold text-slate-400">—</p>
+                    )}
                   </div>
                 </div>
               ))}

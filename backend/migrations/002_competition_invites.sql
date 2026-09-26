@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS competition_invites (
 );
 
 -- Indexes for common queries
-CREATE INDEX idx_competition_invites_competition ON competition_invites(competition_id);
-CREATE INDEX idx_competition_invites_email ON competition_invites(email);
-CREATE INDEX idx_competition_invites_token ON competition_invites(invite_token);
-CREATE INDEX idx_competition_invites_status ON competition_invites(status);
+CREATE INDEX IF NOT EXISTS idx_competition_invites_competition ON competition_invites(competition_id);
+CREATE INDEX IF NOT EXISTS idx_competition_invites_email ON competition_invites(email);
+CREATE INDEX IF NOT EXISTS idx_competition_invites_token ON competition_invites(invite_token);
+CREATE INDEX IF NOT EXISTS idx_competition_invites_status ON competition_invites(status);

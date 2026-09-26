@@ -208,6 +208,19 @@ Set all env vars, run migrations, and ensure `FRONTEND_URL` / `VITE_API_URL` poi
 
 ---
 
+## UX Backlog (Not Implemented)
+
+- Add a clear `Open Season` vs `Locked Season` mode banner with one primary CTA.
+- Add pre-submit `prediction confidence` feedback (for example: major movers vs AFL now).
+- Add `Quick Compare` mode to show only differences between selected users' ladders.
+- Add draft autosave with `Last saved` timestamp in prediction edit flow.
+- Add team search/jump in prediction editor to quickly locate and move teams.
+- Improve invite loop with pending/accepted metrics and one-click invite link copy.
+- Add personal progress cards after lockout (best rank, best pick accuracy, biggest miss).
+- Add lightweight competition activity feed (submissions, ladder sync updates, rank changes).
+
+---
+
 ## License
 
 MIT

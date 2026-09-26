@@ -59,9 +59,8 @@ export default function LoginPage() {
           <p className="text-slate-400 text-lg leading-relaxed">
             Pick all 18 teams. Score points based on accuracy. Compete with friends and the world.
           </p>
-          <div className="mt-10 grid grid-cols-3 gap-6">
+          <div className="mt-10 grid grid-cols-2 gap-6">
             {[
-              { label: 'Cutoff', value: 'Mar 10' },
               { label: 'Teams', value: '18' },
               { label: 'Scoring', value: 'Low wins' },
             ].map(stat => (
@@ -75,7 +74,7 @@ export default function LoginPage() {
 
         <div className="relative z-10 flex items-center gap-2">
           <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-          <p className="text-slate-500 text-sm">2026 AFL Season predictions open</p>
+          <p className="text-slate-500 text-sm">2026 AFL Season underway</p>
         </div>
       </div>
 

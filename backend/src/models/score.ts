@@ -156,19 +156,47 @@ export class ScoreModel {
   }
 
   static async getGlobalLeaderboard(seasonId: number, limit: number = 100): Promise<any[]> {
-    // Use predictions directly so each user appears once regardless of how many
-    // competitions they've entered (scoring is per-ladder, not per-competition).
+    // Compute each predictor's score directly from their prediction vs the actual
+    // AFL ladder snapshot — this ensures users not in any competition still get a score.
     const result = await db.query(
-      `SELECT u.id as "userId", u.display_name as "displayName", u.email,
-              p.total_score as "totalPoints",
-              (SELECT COUNT(*) FROM competition_members cm
-               JOIN competitions c ON cm.competition_id = c.id
-               WHERE cm.user_id = u.id AND c.season_id = $1) as "competitionCount",
-              p.total_score as "avgPoints"
+      `WITH latest_snapshot AS (
+         -- Pick the most recent ladder snapshot for this season
+         SELECT id FROM afl_ladder_snapshots
+         WHERE season_id = $1
+         ORDER BY captured_at DESC
+         LIMIT 1
+       ),
+       ladder_positions AS (
+         -- Actual team positions from that snapshot
+         SELECT lt.team_name, lt.position
+         FROM afl_ladder_teams lt
+         JOIN latest_snapshot ls ON lt.snapshot_id = ls.id
+       ),
+       user_computed_scores AS (
+         -- Sum |predicted - actual| across all teams for each predictor
+         SELECT
+           p.user_id,
+           SUM(ABS(pt.position - lp.position)) AS total_points
+         FROM predictions p
+         JOIN predicted_teams pt ON pt.prediction_id = p.id
+         JOIN ladder_positions lp ON lp.team_name = pt.team_name
+         WHERE p.season_id = $1
+         GROUP BY p.user_id
+       )
+       SELECT
+         u.id AS "userId",
+         u.display_name AS "displayName",
+         ucs.total_points AS "totalPoints",
+         (SELECT COUNT(*) FROM competition_members cm
+          JOIN competitions c ON cm.competition_id = c.id
+          WHERE cm.user_id = u.id AND c.season_id = $1)::int AS "competitionCount"
        FROM predictions p
        JOIN users u ON p.user_id = u.id
-       WHERE p.season_id = $1 AND p.total_score IS NOT NULL
-       ORDER BY p.total_score ASC
+       LEFT JOIN user_computed_scores ucs ON ucs.user_id = u.id
+       WHERE p.season_id = $1
+         AND p.submitted_at IS NOT NULL
+         AND u.is_private = false
+       ORDER BY ucs.total_points ASC NULLS LAST, p.submitted_at ASC
        LIMIT $2`,
       [seasonId, limit]
     )
