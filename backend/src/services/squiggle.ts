@@ -32,6 +32,8 @@ const SQUIGGLE_TO_INTERNAL: Record<string, string> = {
 // position and everyone else keeps their relative Squiggle order around them.
 const FINALS_POSITION_ADJUSTMENTS: Record<number, Record<string, number>> = {
   2026: {
+    'Brisbane Lions': 1, // premiers
+    'Fremantle': 2,      // grand final runner-up
     'Sydney Swans': 3,   // preliminary final loser
     'Hawthorn': 4,       // preliminary final loser
     'Melbourne': 9,      // wildcard loser
