@@ -80,7 +80,7 @@ export default function AdminPage() {
   const navigate = useNavigate()
   const { user, token, isAdmin } = useAuthStore()
   const queryClient = useQueryClient()
-  const { seasonId, seasonYear, cutoffAt } = useCurrentSeason()
+  const { seasonId, seasonYear, cutoffAt, grandFinalAt, finalsFormat, seasonStatus } = useCurrentSeason()
   const [syncStatus, setSyncStatus] = useState<string | null>(null)
   const [syncLoading, setSyncLoading] = useState(false)
   const [exportLoading, setExportLoading] = useState(false)
@@ -91,6 +91,10 @@ export default function AdminPage() {
   const [cutoffMonth, setCutoffMonth] = useState<string>('1')
   const [cutoffYear, setCutoffYear] = useState<string>(String(seasonYear))
   const [cutoffStatus, setCutoffStatus] = useState<string | null>(null)
+  const [gfDateInput, setGfDateInput] = useState<string>('')
+  const [formatInput, setFormatInput] = useState<string>('wildcard10')
+  const [seasonSettingsStatus, setSeasonSettingsStatus] = useState<string | null>(null)
+  const [lifecycleLoading, setLifecycleLoading] = useState(false)
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null)
   const [templateName, setTemplateName] = useState('')
   const [templateDescription, setTemplateDescription] = useState('')
@@ -102,7 +106,7 @@ export default function AdminPage() {
   const [previewSubject, setPreviewSubject] = useState('')
   const [previewHtml, setPreviewHtml] = useState('')
   const [previewSampleJson, setPreviewSampleJson] = useState(
-    '{\n  "roundNo": 1,\n  "seasonYear": 2026,\n  "roundSummary": "Round summary goes here"\n}'
+    `{\n  "roundNo": 1,\n  "seasonYear": ${seasonYear},\n  "roundSummary": "Round summary goes here"\n}`
   )
   const [audienceMode, setAudienceMode] = useState<'all' | 'groups' | 'test'>('all')
   const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([])
@@ -120,6 +124,11 @@ export default function AdminPage() {
     setCutoffMonth(String(cutoffAt.getMonth() + 1))
     setCutoffYear(String(cutoffAt.getFullYear()))
   }, [cutoffAt.getTime()])
+
+  useEffect(() => {
+    setGfDateInput(grandFinalAt ? grandFinalAt.toISOString().slice(0, 10) : '')
+    setFormatInput(finalsFormat)
+  }, [grandFinalAt?.getTime(), finalsFormat])
 
   useEffect(() => {
     setCampaignSeasonId(String(seasonId))
@@ -532,6 +541,41 @@ export default function AdminPage() {
     updateCutoffMutation.mutate(toIsoDate(year, month, day))
   }
 
+  async function handleSaveSeasonSettings() {
+    setSeasonSettingsStatus(null)
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/admin/seasons/${seasonId}/settings`, token!, {
+        method: 'PUT',
+        body: JSON.stringify({
+          grandFinalDate: gfDateInput ? gfDateInput : null,
+          finalsFormat: formatInput,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to update season')
+      setSeasonSettingsStatus('✅ Season settings saved')
+      await queryClient.invalidateQueries({ queryKey: ['current-season'] })
+    } catch (err: any) {
+      setSeasonSettingsStatus(`❌ ${err.message}`)
+    }
+  }
+
+  async function handleRunLifecycle() {
+    setLifecycleLoading(true)
+    setSeasonSettingsStatus(null)
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/admin/seasons/lifecycle/run`, token!, { method: 'POST', body: '{}' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Lifecycle run failed')
+      setSeasonSettingsStatus(`✅ ${data.message}`)
+      await queryClient.invalidateQueries({ queryKey: ['current-season'] })
+    } catch (err: any) {
+      setSeasonSettingsStatus(`❌ ${err.message}`)
+    } finally {
+      setLifecycleLoading(false)
+    }
+  }
+
   async function handleSyncLadder() {
     setSyncLoading(true)
     setSyncStatus(null)
@@ -756,6 +800,51 @@ export default function AdminPage() {
             {cutoffStatus && (
               <p className={`mt-2 text-sm font-medium ${cutoffStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
                 {cutoffStatus}
+              </p>
+            )}
+          </div>
+          <div className="mt-5 rounded-xl border border-slate-200 p-4">
+            <h3 className="text-sm font-bold text-slate-700 mb-1">Season Lifecycle</h3>
+            <p className="text-xs text-slate-500 mb-3">
+              Season {seasonYear} · status <span className="font-semibold">{seasonStatus ?? 'unknown'}</span> · grand final{' '}
+              {grandFinalAt ? grandFinalAt.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : 'not set (picked up from the fixture automatically)'}
+              {' '}· format <span className="font-semibold">{finalsFormat}</span>.
+              The season locks at the cutoff, completes 14 days after the grand final, and next season is created automatically when the AFL fixture is published.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-slate-500">Grand final</label>
+              <input
+                type="date"
+                value={gfDateInput}
+                onChange={(e) => setGfDateInput(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm"
+              />
+              <label className="text-xs text-slate-500 ml-2">Finals format</label>
+              <select
+                value={formatInput}
+                onChange={(e) => setFormatInput(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm"
+              >
+                <option value="wildcard10">Wildcard round + final eight (top 10)</option>
+                <option value="top8">Classic final eight (top 8)</option>
+              </select>
+              <button
+                onClick={handleSaveSeasonSettings}
+                className="px-4 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold"
+              >
+                Save Season Settings
+              </button>
+              <button
+                onClick={handleRunLifecycle}
+                disabled={lifecycleLoading}
+                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-xs font-semibold disabled:opacity-50"
+              >
+                {lifecycleLoading ? 'Running…' : 'Run Lifecycle Now'}
+              </button>
+            </div>
+            {seasonSettingsStatus && (
+              <p className={`mt-2 text-sm font-medium ${seasonSettingsStatus.startsWith('✅') ? 'text-emerald-600' : 'text-red-500'}`}>
+                {seasonSettingsStatus}
               </p>
             )}
           </div>

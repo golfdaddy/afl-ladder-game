@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
 import api from '../services/api'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 export default function LoginPage() {
+  const { seasonYear, isLocked } = useCurrentSeason()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -53,7 +55,7 @@ export default function LoginPage() {
         <div className="relative z-10">
           <h1 className="text-4xl font-black text-white leading-tight mb-4">
             Predict the<br />
-            <span className="text-emerald-400">2026 Season</span><br />
+            <span className="text-emerald-400">{seasonYear} Season</span><br />
             Ladder
           </h1>
           <p className="text-slate-400 text-lg leading-relaxed">
@@ -74,7 +76,7 @@ export default function LoginPage() {
 
         <div className="relative z-10 flex items-center gap-2">
           <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-          <p className="text-slate-500 text-sm">2026 AFL Season underway</p>
+          <p className="text-slate-500 text-sm">{seasonYear} AFL Season {isLocked ? 'underway' : 'predictions open'}</p>
         </div>
       </div>
 

@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import api from '../services/api'
 import { getTeamMeta, posBadgeClass, totalForMember } from '../utils/aflTeams'
+import { computeBracket, computeFinalStandings, qualifierCount, FinalsFormat } from '../utils/finalsBracket'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,8 @@ export interface FullSeasonSimulatorProps {
   } | null | undefined
   predictions: MemberPrediction[]
   currentUserId: number | null
+  /** Finals format for the season (wildcard round + eight, or classic eight) */
+  finalsFormat?: FinalsFormat
 }
 
 interface RoundData {
@@ -240,6 +243,7 @@ export default function FullSeasonSimulator({
   aflLadderData,
   predictions,
   currentUserId,
+  finalsFormat = 'wildcard10',
 }: FullSeasonSimulatorProps) {
   const [currentRoundIdx, setCurrentRoundIdx] = useState(0)
   const [gamePicks, setGamePicks] = useState<Record<string, string>>({})
@@ -313,74 +317,26 @@ export default function FullSeasonSimulator({
   // ── Finals Bracket Computation ───────────────────────────────────────────────
 
   const finalsState = useMemo(() => {
-    const top10 = simRegularSeasonLadder.slice(0, 10).map(t => t.teamName)
-
-    // A pick only counts while it matches one of the current participants,
-    // so changing an upstream result invalidates downstream picks.
-    const pickOf = (matchId: string, a: string | null, b: string | null) => {
-      const p = finalsPicks[matchId] || null
-      return p && a && b && (p === a || p === b) ? p : null
+    const top10 = simRegularSeasonLadder.slice(0, qualifierCount(finalsFormat)).map(t => t.teamName)
+    const s = computeBracket(top10, finalsPicks, [], finalsFormat)
+    return {
+      top10, state: s,
+      wc1w: s.WC1.winner, wc1l: s.WC1.loser, wc2w: s.WC2.winner, wc2l: s.WC2.loser,
+      seed7: s.seed7, seed8: s.seed8,
+      qf1w: s.QF1.winner, qf1l: s.QF1.loser, qf2w: s.QF2.winner, qf2l: s.QF2.loser,
+      ef1w: s.EF1.winner, ef1l: s.EF1.loser, ef2w: s.EF2.winner, ef2l: s.EF2.loser,
+      sf1w: s.SF1.winner, sf1l: s.SF1.loser, sf2w: s.SF2.winner, sf2l: s.SF2.loser,
+      pf1w: s.PF1.winner, pf1l: s.PF1.loser, pf2w: s.PF2.winner, pf2l: s.PF2.loser,
+      gfw: s.GF.winner, gfl: s.GF.loser,
     }
-
-    // 2026 Wildcard Round: WC1 = 7v10, WC2 = 8v9 — winners take the last two spots
-    const wc1w = pickOf('WC1', top10[6] || null, top10[9] || null)
-    const wc1l = wc1w ? (wc1w === top10[6] ? top10[9] : top10[6]) : null
-    const wc2w = pickOf('WC2', top10[7] || null, top10[8] || null)
-    const wc2l = wc2w ? (wc2w === top10[7] ? top10[8] : top10[7]) : null
-
-    // Higher-ranked wildcard winner is re-seeded 7th, the other 8th
-    let seed7: string | null = null
-    let seed8: string | null = null
-    if (wc1w && wc2w) {
-      if (top10.indexOf(wc1w) < top10.indexOf(wc2w)) { seed7 = wc1w; seed8 = wc2w }
-      else { seed7 = wc2w; seed8 = wc1w }
-    }
-
-    // AFL final eight: QF1 = 1v4, QF2 = 2v3, EF1 = 5v8, EF2 = 6v7
-    const qf1w = pickOf('QF1', top10[0] || null, top10[3] || null)
-    const qf1l = qf1w ? (qf1w === top10[0] ? top10[3] : top10[0]) : null
-    const qf2w = pickOf('QF2', top10[1] || null, top10[2] || null)
-    const qf2l = qf2w ? (qf2w === top10[1] ? top10[2] : top10[1]) : null
-    const ef1w = pickOf('EF1', top10[4] || null, seed8)
-    const ef1l = ef1w ? (ef1w === top10[4] ? seed8 : top10[4]) : null
-    const ef2w = pickOf('EF2', top10[5] || null, seed7)
-    const ef2l = ef2w ? (ef2w === top10[5] ? seed7 : top10[5]) : null
-
-    // SF1 = QF1 loser v EF1 winner, SF2 = QF2 loser v EF2 winner
-    const sf1w = pickOf('SF1', qf1l, ef1w)
-    const sf1l = sf1w ? (sf1w === qf1l ? ef1w : qf1l) : null
-    const sf2w = pickOf('SF2', qf2l, ef2w)
-    const sf2l = sf2w ? (sf2w === qf2l ? ef2w : qf2l) : null
-
-    // PF1 = QF1 winner v SF2 winner, PF2 = QF2 winner v SF1 winner
-    const pf1w = pickOf('PF1', qf1w, sf2w)
-    const pf1l = pf1w ? (pf1w === qf1w ? sf2w : qf1w) : null
-    const pf2w = pickOf('PF2', qf2w, sf1w)
-    const pf2l = pf2w ? (pf2w === qf2w ? sf1w : qf2w) : null
-
-    const gfw = pickOf('GF', pf1w, pf2w)
-    const gfl = gfw ? (gfw === pf1w ? pf2w : pf1w) : null
-
-    return { top10, wc1w, wc1l, wc2w, wc2l, seed7, seed8, qf1w, qf1l, qf2w, qf2l, ef1w, ef1l, ef2w, ef2l, sf1w, sf1l, sf2w, sf2l, pf1w, pf1l, pf2w, pf2l, gfw, gfl }
-  }, [finalsPicks, simRegularSeasonLadder])
+  }, [finalsPicks, simRegularSeasonLadder, finalsFormat])
 
   // ── Final Standings ──────────────────────────────────────────────────────────
 
   const finalStandings = useMemo((): string[] | null => {
-    const { top10, gfw, gfl, pf1l, pf2l, sf1l, sf2l, ef1l, ef2l, wc1l, wc2l, seed7, seed8 } = finalsState
-    if (!gfw || !gfl || !pf1l || !pf2l || !sf1l || !sf2l || !ef1l || !ef2l || !wc1l || !wc2l || !seed7 || !seed8) return null
-
-    const rest = simRegularSeasonLadder.slice(10).map(t => t.teamName)
-
-    // Effective top 8 after wildcard re-seeding — used to order eliminated teams
-    const effTop8 = [...top10.slice(0, 6), seed7, seed8]
-    const prelimLosers = [pf1l, pf2l].sort((a, b) => effTop8.indexOf(a) - effTop8.indexOf(b))
-    const semiLosers = [sf1l, sf2l].sort((a, b) => effTop8.indexOf(a) - effTop8.indexOf(b))
-    const elimLosers = [ef1l, ef2l].sort((a, b) => effTop8.indexOf(a) - effTop8.indexOf(b))
-    const wcLosers = [wc1l, wc2l].sort((a, b) => top10.indexOf(a) - top10.indexOf(b))
-
-    return [gfw, gfl, prelimLosers[0], prelimLosers[1], semiLosers[0], semiLosers[1], elimLosers[0], elimLosers[1], wcLosers[0], wcLosers[1], ...rest]
-  }, [finalsState, simRegularSeasonLadder])
+    const rest = simRegularSeasonLadder.slice(finalsState.top10.length).map(t => t.teamName)
+    return computeFinalStandings(finalsState.state, finalsState.top10, rest, finalsFormat)
+  }, [finalsState, simRegularSeasonLadder, finalsFormat])
 
   // ── Simulated Leaderboard ────────────────────────────────────────────────────
 
@@ -588,7 +544,8 @@ export default function FullSeasonSimulator({
               </div>
             </div>
 
-            {/* Week 1 — Wildcard Round (new in 2026) */}
+            {/* Week 1 — Wildcard Round (wildcard10 format only) */}
+            {finalsFormat === 'wildcard10' && (
             <div>
               <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Week 1 — Wildcard Round</p>
               <p className="text-[10px] text-slate-400 mb-2">7th–10th play off for the last two finals spots. The higher-ranked winner is re-seeded 7th, the other 8th. Top six rest this week.</p>
@@ -613,6 +570,7 @@ export default function FullSeasonSimulator({
                 />
               </div>
             </div>
+            )}
 
             {/* Week 2 */}
             <div>

@@ -7,7 +7,6 @@ import { useCurrentSeason } from '../hooks/useCurrentSeason'
 import FullSeasonSimulator from '../components/FullSeasonSimulator'
 import FinalsPredictor from '../components/FinalsPredictor'
 import SeasonHonours from '../components/SeasonHonours'
-import { SEASON_COMPLETE } from '../config'
 
 interface LeaderboardEntry {
   userId: number
@@ -289,7 +288,7 @@ export default function CompetitionPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
-  const { seasonId, seasonYear, isLocked: competitionLocked } = useCurrentSeason()
+  const { seasonId, seasonYear, isLocked: competitionLocked, seasonComplete, finalsFormat } = useCurrentSeason()
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [inviteError, setInviteError] = useState('')
@@ -960,7 +959,7 @@ export default function CompetitionPage() {
           </div>
         </div>
 
-        {SEASON_COMPLETE && leaderboard.length > 0 && (
+        {seasonComplete && leaderboard.length > 0 && (
           <SeasonHonours
             entries={leaderboard}
             currentUserId={currentUser?.id ?? null}
@@ -970,8 +969,8 @@ export default function CompetitionPage() {
 
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100">
-            <h2 className="text-lg font-bold text-slate-900">{SEASON_COMPLETE ? 'Final Standings' : 'Leaderboard'}</h2>
-            <p className="text-sm text-slate-500 mt-0.5">{SEASON_COMPLETE ? 'The season is done — final scores against the post-finals ladder' : 'Scores update when the AFL ladder is refreshed - Lower is better'}</p>
+            <h2 className="text-lg font-bold text-slate-900">{seasonComplete ? 'Final Standings' : 'Leaderboard'}</h2>
+            <p className="text-sm text-slate-500 mt-0.5">{seasonComplete ? 'The season is done — final scores against the post-finals ladder' : 'Scores update when the AFL ladder is refreshed - Lower is better'}</p>
           </div>
           {leaderboardLoading ? (
             <div className="p-6 space-y-3">
@@ -1008,10 +1007,10 @@ export default function CompetitionPage() {
                       {entry.userId === currentUser?.id && (
                         <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold flex-shrink-0">You</span>
                       )}
-                      {SEASON_COMPLETE && leaderboard.length >= 2 && entry.totalPoints === leaderboard[0].totalPoints && (
+                      {seasonComplete && leaderboard.length >= 2 && entry.totalPoints === leaderboard[0].totalPoints && (
                         <span className="text-sm flex-shrink-0" title="Champion">🏆</span>
                       )}
-                      {SEASON_COMPLETE && leaderboard.length >= 2 && entry.totalPoints === leaderboard[leaderboard.length - 1].totalPoints && entry.totalPoints !== leaderboard[0].totalPoints && (
+                      {seasonComplete && leaderboard.length >= 2 && entry.totalPoints === leaderboard[leaderboard.length - 1].totalPoints && entry.totalPoints !== leaderboard[0].totalPoints && (
                         <span className="text-sm flex-shrink-0" title="Wooden spoon">🥄</span>
                       )}
                     </div>
@@ -1472,6 +1471,7 @@ export default function CompetitionPage() {
                         aflLadderData={aflLadderData}
                         predictions={memberPredictions}
                         currentUserId={currentUser?.id ?? null}
+                        finalsFormat={finalsFormat}
                       />
                     )}
 
@@ -1744,6 +1744,7 @@ export default function CompetitionPage() {
                     currentUserId={currentUser?.id ?? null}
                     actualLadder={aflTeams}
                     finalsGames={finalsGamesData?.games || []}
+                    finalsFormat={finalsFormat}
                   />
                 )}
               </div>

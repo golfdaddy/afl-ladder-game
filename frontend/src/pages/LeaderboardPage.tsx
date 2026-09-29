@@ -21,7 +21,7 @@ const medalColors = [
 
 export default function LeaderboardPage() {
   const navigate = useNavigate()
-  const { seasonId } = useCurrentSeason()
+  const { seasonId, seasonYear } = useCurrentSeason()
 
   const { data: competitions = [], isLoading: compsLoading } = useQuery({
     queryKey: ['competitions'],
@@ -56,7 +56,7 @@ export default function LeaderboardPage() {
             </button>
             <div>
               <h1 className="text-2xl font-black text-white">Leaderboards</h1>
-              <p className="text-slate-400 text-sm">2026 AFL Season</p>
+              <p className="text-slate-400 text-sm">{seasonYear} AFL Season</p>
             </div>
           </div>
         </div>

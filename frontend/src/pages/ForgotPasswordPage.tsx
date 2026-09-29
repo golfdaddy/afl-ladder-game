@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../services/api'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 export default function ForgotPasswordPage() {
+  const { seasonYear } = useCurrentSeason()
   const [email, setEmail]       = useState('')
   const [loading, setLoading]   = useState(false)
   const [sent, setSent]         = useState(false)
@@ -47,7 +49,7 @@ export default function ForgotPasswordPage() {
         </div>
         <div className="relative z-10 flex items-center gap-2">
           <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-          <p className="text-slate-500 text-sm">2026 AFL Season predictions open</p>
+          <p className="text-slate-500 text-sm">{seasonYear} AFL Season</p>
         </div>
       </div>
 

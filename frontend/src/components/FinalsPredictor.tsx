@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { getTeamMeta, posBadgeClass, totalForMember } from '../utils/aflTeams'
-import { computeBracket, computeFinalStandings, FinalsGame } from '../utils/finalsBracket'
+import { computeBracket, computeFinalStandings, qualifierCount, FinalsGame, FinalsFormat } from '../utils/finalsBracket'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -26,6 +26,8 @@ export interface FinalsPredictorProps {
   actualLadder?: string[]
   /** Real finals fixtures/results — completed games are locked into the bracket */
   finalsGames?: FinalsGame[]
+  /** Finals format for the season (wildcard round + eight, or classic eight) */
+  finalsFormat?: FinalsFormat
 }
 
 // ── Subcomponents ──────────────────────────────────────────────────────────────
@@ -137,18 +139,20 @@ export default function FinalsPredictor({
   currentUserId,
   actualLadder = [],
   finalsGames = [],
+  finalsFormat = 'wildcard10',
 }: FinalsPredictorProps) {
   const [finalsPicks, setFinalsPicks] = useState<Record<string, string>>({})
   const [rightPanel, setRightPanel] = useState<'ladder' | 'leaderboard'>('ladder')
+  const qualifiers = qualifierCount(finalsFormat)
 
   // Once finals have started (any real finals fixture exists) the home-and-away
   // ladder is final, so seed the bracket from the actual ladder instead of model
   // projections — which Squiggle stops publishing after the regular season.
   const finalsStarted = finalsGames.length > 0
-  const useActualSeeds = actualLadder.length >= 10 && (finalsStarted || consensusLadder.length === 0)
+  const useActualSeeds = actualLadder.length >= qualifiers && (finalsStarted || consensusLadder.length === 0)
   const seedSource = useActualSeeds ? actualLadder : consensusLadder.map(d => d.teamName)
-  const top10 = seedSource.slice(0, 10)
-  const restNames = seedSource.slice(10)
+  const top10 = seedSource.slice(0, qualifiers)
+  const restNames = seedSource.slice(qualifiers)
 
   // Derive number of models for the note
   const modelCount = useMemo(() => {
@@ -166,15 +170,15 @@ export default function FinalsPredictor({
   // ── Finals Bracket Computation ───────────────────────────────────────────────
 
   const finalsState = useMemo(
-    () => computeBracket(top10, finalsPicks, finalsGames),
-    [finalsPicks, top10, finalsGames]
+    () => computeBracket(top10, finalsPicks, finalsGames, finalsFormat),
+    [finalsPicks, top10, finalsGames, finalsFormat]
   )
 
   // ── Final Standings ──────────────────────────────────────────────────────────
 
   const finalStandings = useMemo(
-    (): string[] | null => computeFinalStandings(finalsState, top10, restNames),
-    [finalsState, top10, restNames]
+    (): string[] | null => computeFinalStandings(finalsState, top10, restNames, finalsFormat),
+    [finalsState, top10, restNames, finalsFormat]
   )
 
   // ── Simulated Leaderboard ────────────────────────────────────────────────────
@@ -235,7 +239,8 @@ export default function FinalsPredictor({
             </div>
           </div>
 
-          {/* Week 1 — Wildcard Round (new in 2026) */}
+          {/* Week 1 — Wildcard Round (wildcard10 format only) */}
+          {finalsFormat === 'wildcard10' && (
           <div>
             <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Week 1 — Wildcard Round</p>
             <p className="text-[10px] text-slate-400 mb-2">7th–10th play off for the last two finals spots. The higher-ranked winner is re-seeded 7th, the other 8th. Top six rest this week.</p>
@@ -262,10 +267,11 @@ export default function FinalsPredictor({
               />
             </div>
           </div>
+          )}
 
           {/* Week 2 */}
           <div>
-            <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Week 2 — Qualifying &amp; Elimination Finals</p>
+            <p className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">{finalsFormat === 'wildcard10' ? 'Week 2' : 'Week 1'} — Qualifying &amp; Elimination Finals</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <FinalsMatchCard
                 matchId="QF1"
