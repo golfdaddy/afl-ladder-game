@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import api from '../services/api'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 export default function RegisterPage() {
+  const { seasonYear } = useCurrentSeason()
   const [formData, setFormData] = useState({ email: '', displayName: '', password: '', confirmPassword: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -64,7 +66,7 @@ export default function RegisterPage() {
         <div className="relative z-10">
           <h1 className="text-4xl font-black text-white leading-tight mb-4">
             Join the<br />
-            <span className="text-emerald-400">2026 Season</span><br />
+            <span className="text-emerald-400">{seasonYear} Season</span><br />
             Challenge
           </h1>
           <p className="text-slate-400 text-lg leading-relaxed">

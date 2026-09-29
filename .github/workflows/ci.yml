@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, 'sandbox/**']
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   backend:
@@ -27,6 +27,10 @@ jobs:
 
       - name: TypeScript check
         run: npx tsc --noEmit
+        working-directory: backend
+
+      - name: Unit tests
+        run: npm test
         working-directory: backend
 
       - name: Build

@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../services/api'
+import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 export default function ResetPasswordPage() {
+  const { seasonYear } = useCurrentSeason()
   const [searchParams]          = useSearchParams()
   const navigate                = useNavigate()
   const token                   = searchParams.get('token') || ''
@@ -79,7 +81,7 @@ export default function ResetPasswordPage() {
         </div>
         <div className="relative z-10 flex items-center gap-2">
           <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-          <p className="text-slate-500 text-sm">2026 AFL Season predictions open</p>
+          <p className="text-slate-500 text-sm">{seasonYear} AFL Season</p>
         </div>
       </div>
 

@@ -106,6 +106,36 @@ Or use the **Sync Ladder** button in the Admin panel. Scores recalculate automat
 
 ---
 
+## Season Lifecycle (runs itself)
+
+The app rolls from one season to the next without manual steps. A daily job
+(`backend/src/jobs/seasonLifecycle.ts`, 3:15am Melbourne, also on every deploy)
+moves the current season through its states and creates the next one:
+
+| Trigger | What happens |
+|---|---|
+| Cutoff date passes | Season `open` → `locked`; predictions close (the UI already locks from the same date) |
+| Finals fixture published | The season's `grand_final_date` is filled in from Squiggle |
+| Grand final + 14 days | Season → `completed`; ladder and scores are frozen |
+| No active season and Squiggle has next year's fixture | Next season is created: `start_date` and `cutoff_date` = first game day, `grand_final_date` when known, finals format inherited |
+
+The hourly ladder sync (`backend/src/jobs/ladderSync.ts`) also derives the
+**post-finals ladder automatically** from real finals results — premier 1st,
+runner-up 2nd, preliminary-final losers 3/4, semi losers 5/6, elimination losers
+7/8, wildcard losers 9/10 (each pair ordered by seed) — using the shared bracket
+engine in `backend/src/utils/finalsBracket.ts`. `FINALS_POSITION_ADJUSTMENTS` in
+`backend/src/services/squiggle.ts` remains as a manual override if a season ever
+needs correcting.
+
+Admin knobs (Admin page, or `PUT /api/admin/seasons/:id/settings`): cutoff date,
+grand final date, finals format (`wildcard10` or `top8`) and status. `POST
+/api/admin/seasons/lifecycle/run` runs the lifecycle immediately.
+
+Set `ADMIN_EMAIL` (with SMTP configured) to be emailed when a season is created,
+locked or completed, when the ladder sync fails repeatedly, or when Squiggle
+returns a team name the app doesn't recognise. `GET /api/admin/health` shows the
+same information on demand.
+
 ## Project Structure
 
 ```
@@ -205,6 +235,19 @@ Lower score = better. Perfect = 0. Updated on every ladder sync.
 - **Database**: Supabase, Neon, Railway Postgres, or AWS RDS
 
 Set all env vars, run migrations, and ensure `FRONTEND_URL` / `VITE_API_URL` point to each other correctly.
+
+---
+
+## UX Backlog (Not Implemented)
+
+- Add a clear `Open Season` vs `Locked Season` mode banner with one primary CTA.
+- Add pre-submit `prediction confidence` feedback (for example: major movers vs AFL now).
+- Add `Quick Compare` mode to show only differences between selected users' ladders.
+- Add draft autosave with `Last saved` timestamp in prediction edit flow.
+- Add team search/jump in prediction editor to quickly locate and move teams.
+- Improve invite loop with pending/accepted metrics and one-click invite link copy.
+- Add personal progress cards after lockout (best rank, best pick accuracy, biggest miss).
+- Add lightweight competition activity feed (submissions, ladder sync updates, rank changes).
 
 ---
 

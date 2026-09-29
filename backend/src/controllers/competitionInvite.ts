@@ -1,8 +1,12 @@
 import { Response } from 'express'
+import { ZodError } from 'zod'
 import { AuthRequest } from '../middleware/auth'
 import { CompetitionModel } from '../models/competition'
 import { CompetitionInviteModel } from '../models/competitionInvite'
 import { UserModel } from '../models/user'
+import { inviteSchema } from '../schemas/competition'
+import { zodError } from '../utils/zodError'
+import { SeasonModel } from '../models/season'
 
 const nodemailer = require('nodemailer')
 
@@ -33,6 +37,8 @@ const sendInviteEmail = async (
 ) => {
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173'
   const inviteLink = `${frontendUrl}/invite/${inviteToken}`
+  const season = await SeasonModel.getCurrentSeason().catch(() => null)
+  const seasonLabel = season ? `the ${season.year} season` : 'the season'
 
   const transporter = createTransporter()
 
@@ -41,7 +47,7 @@ const sendInviteEmail = async (
       <h2 style="color: #1e40af;">AFL Ladder Prediction Game</h2>
       <p>Hey there!</p>
       <p><strong>${invitedByName}</strong> has invited you to join their competition: <strong>${competitionName}</strong></p>
-      <p>Predict the final AFL ladder positions for the 2026 season and compete against friends!</p>
+      <p>Predict the final AFL ladder positions for ${seasonLabel} and compete against friends!</p>
       <div style="margin: 30px 0; text-align: center;">
         <a href="${inviteLink}"
            style="background-color: #2563eb; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
@@ -84,18 +90,8 @@ export class CompetitionInviteController {
       }
 
       const { id } = req.params
-      const { email } = req.body
       const competitionId = parseInt(id)
-
-      if (!email) {
-        return res.status(400).json({ error: 'Email is required' })
-      }
-
-      // Validate email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-      if (!emailRegex.test(email)) {
-        return res.status(400).json({ error: 'Invalid email address' })
-      }
+      const { email } = inviteSchema.parse(req.body)  // validates + lowercases
 
       // Check competition exists
       const competition = await CompetitionModel.findById(competitionId)
@@ -110,7 +106,7 @@ export class CompetitionInviteController {
       }
 
       // Check if this email is already a member
-      const existingUser = await UserModel.findByEmail(email.toLowerCase())
+      const existingUser = await UserModel.findByEmail(email)
       if (existingUser) {
         const alreadyMember = await CompetitionModel.isMember(competitionId, existingUser.id)
         if (alreadyMember) {
@@ -121,7 +117,7 @@ export class CompetitionInviteController {
       // Check if already invited
       const existingInvite = await CompetitionInviteModel.findByCompetitionAndEmail(
         competitionId,
-        email.toLowerCase()
+        email
       )
       if (existingInvite && existingInvite.status === 'pending') {
         return res.status(400).json({ error: 'An invite has already been sent to this email' })
@@ -136,7 +132,7 @@ export class CompetitionInviteController {
       const invite = await CompetitionInviteModel.create(
         competitionId,
         req.userId,
-        email.toLowerCase()
+        email
       )
 
       // Get inviter's name
@@ -146,7 +142,7 @@ export class CompetitionInviteController {
       // Send the email
       try {
         await sendInviteEmail(
-          email.toLowerCase(),
+          email,
           competition.name,
           inviterName,
           invite.inviteToken,
@@ -167,6 +163,7 @@ export class CompetitionInviteController {
         }
       })
     } catch (error: any) {
+      if (error instanceof ZodError) return zodError(res, error)
       console.error('Invite error:', error)
       if (error.constraint === 'competition_invites_competition_id_email_key') {
         return res.status(400).json({ error: 'An invite has already been sent to this email' })
@@ -225,7 +222,7 @@ export class CompetitionInviteController {
 
       // Allow accepting even if emails don't match (user might have registered with different email)
       // But log it for tracking
-      if (user.email.toLowerCase() !== invite.email.toLowerCase()) {
+      if (user.email !== invite.email) {
         console.log(`Invite accepted by different email: invite=${invite.email}, user=${user.email}`)
       }
 
