@@ -26,10 +26,11 @@ const SQUIGGLE_TO_INTERNAL: Record<string, string> = {
   'Western Bulldogs':  'Western Bulldogs',
 }
 
-// Post-finals position adjustments, keyed by season year then internal team name.
-// The Squiggle standings feed reflects the home-and-away ladder, but our game's
-// scoring uses the post-finals order — teams listed here are pinned to the given
-// position and everyone else keeps their relative Squiggle order around them.
+// Manual post-finals position overrides, keyed by season year then internal team
+// name. Post-finals positions are normally derived automatically from real finals
+// results (see jobs/ladderSync.ts + utils/finalsBracket.ts); this map is the
+// escape hatch for a season where the automatic derivation needs correcting.
+// Manual entries win over automatic ones for the same team.
 const FINALS_POSITION_ADJUSTMENTS: Record<number, Record<string, number>> = {
   2026: {
     'Brisbane Lions': 1, // premiers
@@ -39,6 +40,39 @@ const FINALS_POSITION_ADJUSTMENTS: Record<number, Record<string, number>> = {
     'Melbourne': 9,      // wildcard loser
     'Collingwood': 10,   // wildcard loser
   },
+}
+
+export function getManualFinalsPins(year: number): Record<string, number> {
+  return FINALS_POSITION_ADJUSTMENTS[year] || {}
+}
+
+// Squiggle occasionally changes how it names a club (e.g. "Brisbane" became
+// "Brisbane Lions" in 2026). Resolve tolerantly — exact, case-insensitive, then
+// by leading word — and record anything we still can't place so the admin
+// health endpoint and alerts can surface it instead of scoring silently breaking.
+const unknownTeamNames = new Map<string, Date>()
+const lowerMap = new Map(Object.entries(SQUIGGLE_TO_INTERNAL).map(([k, v]) => [k.toLowerCase(), v]))
+
+export function resolveTeamName(raw: string): string {
+  if (!raw) return raw
+  const exact = SQUIGGLE_TO_INTERNAL[raw]
+  if (exact) return exact
+  const lower = raw.trim().toLowerCase()
+  const ci = lowerMap.get(lower)
+  if (ci) return ci
+  // "Brisbane Lions FC" / "GWS Giants" style variants — match on the leading word(s)
+  for (const [key, value] of lowerMap) {
+    if (lower.startsWith(key + ' ') || key.startsWith(lower + ' ')) return value
+  }
+  if (!unknownTeamNames.has(raw)) {
+    unknownTeamNames.set(raw, new Date())
+    console.warn(`[Squiggle] Unknown team name: "${raw}" — add to SQUIGGLE_TO_INTERNAL map`)
+  }
+  return raw
+}
+
+export function getUnknownTeamNames(): Array<{ name: string; firstSeen: Date }> {
+  return [...unknownTeamNames.entries()].map(([name, firstSeen]) => ({ name, firstSeen }))
 }
 
 interface SquiggleStanding {
@@ -144,26 +178,32 @@ interface SquiggleLadderResponse {
 }
 
 /**
- * Re-seats the adjusted teams at their pinned positions, keeping every other
- * team in its existing order. Positions are renumbered 1..N afterwards.
- * Returns the ladder untouched if any adjusted team is missing (partial data).
+ * Re-seats pinned teams at the given positions, keeping every other team in its
+ * existing order. Positions are renumbered 1..N afterwards. Returns the ladder
+ * untouched (with a warning) if a pinned team is missing, a position is out of
+ * range, or two teams share a position.
  */
-export function applyFinalsAdjustments(year: number, teams: SquiggleMappedTeam[]): SquiggleMappedTeam[] {
-  const adjustments = FINALS_POSITION_ADJUSTMENTS[year]
-  if (!adjustments) return teams
+export function applyPositionPins(
+  teams: SquiggleMappedTeam[],
+  pins: Record<string, number>,
+  label = 'post-finals positions'
+): SquiggleMappedTeam[] {
+  const entries = Object.entries(pins)
+  if (entries.length === 0) return teams
 
-  const pinned = Object.entries(adjustments).map(([teamName, position]) => ({
+  const pinned = entries.map(([teamName, position]) => ({
     team: teams.find(t => t.teamName === teamName),
     position,
   }))
-  if (pinned.some(p => !p.team || p.position < 1 || p.position > teams.length)) {
-    console.warn(`[Squiggle] Finals adjustments for ${year} reference missing teams/positions — skipping`)
+  const positions = new Set(pinned.map(p => p.position))
+  if (pinned.some(p => !p.team || p.position < 1 || p.position > teams.length) || positions.size !== pinned.length) {
+    console.warn(`[Squiggle] ${label} reference missing teams or conflicting positions — skipping`)
     return teams
   }
 
   const rest = [...teams]
     .sort((a, b) => a.position - b.position)
-    .filter(t => adjustments[t.teamName] === undefined)
+    .filter(t => pins[t.teamName] === undefined)
 
   const reordered: SquiggleMappedTeam[] = []
   for (let pos = 1; pos <= teams.length; pos++) {
@@ -171,11 +211,23 @@ export function applyFinalsAdjustments(year: number, teams: SquiggleMappedTeam[]
     reordered.push(pin ? pin.team! : rest.shift()!)
   }
 
-  console.log(
-    `[Squiggle] Applied post-finals adjustments for ${year}: ` +
-    Object.entries(adjustments).map(([t, p]) => `${t} → ${p}`).join(', ')
-  )
+  console.log(`[Squiggle] Applied ${label}: ` + entries.map(([t, p]) => `${t} → ${p}`).join(', '))
   return reordered.map((t, idx) => ({ ...t, position: idx + 1 }))
+}
+
+export interface SeasonFixtureSummary {
+  year: number
+  gameCount: number
+  firstGameDate: string | null   // YYYY-MM-DD (Melbourne)
+  lastGameDate: string | null
+  grandFinalDate: string | null  // present once Squiggle publishes the finals fixture
+}
+
+/** Melbourne calendar date of a Squiggle game timestamp ("YYYY-MM-DD HH:MM:SS", AEST/AEDT). */
+function melbourneDate(date: string | null): string | null {
+  if (!date) return null
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(date)
+  return m ? m[1] : null
 }
 
 export class SquiggleService {
@@ -196,28 +248,48 @@ export class SquiggleService {
 
     const mapped: SquiggleMappedTeam[] = data.standings
       .sort((a, b) => a.rank - b.rank)
-      .map((s) => {
-        const internalName = SQUIGGLE_TO_INTERNAL[s.name]
-        if (!internalName) {
-          console.warn(`[Squiggle] Unknown team name: "${s.name}" — add to SQUIGGLE_TO_INTERNAL map`)
-        }
-        return {
-          position:      s.rank,
-          teamName:      internalName || s.name,
-          wins:          s.wins,
-          losses:        s.losses,
-          draws:         s.draws || 0,
-          pointsFor:     Math.round(s.for || 0),
-          pointsAgainst: Math.round(s.against || 0),
-          percentage:    Math.round((s.percentage || 0) * 10) / 10,
-        }
-      })
+      .map((s) => ({
+        position:      s.rank,
+        teamName:      resolveTeamName(s.name),
+        wins:          s.wins,
+        losses:        s.losses,
+        draws:         s.draws || 0,
+        pointsFor:     Math.round(s.for || 0),
+        pointsAgainst: Math.round(s.against || 0),
+        percentage:    Math.round((s.percentage || 0) * 10) / 10,
+      }))
 
     if (mapped.length < 18) {
       console.warn(`[Squiggle] Only ${mapped.length} teams returned — season may not have started`)
     }
 
-    return applyFinalsAdjustments(year, mapped)
+    return mapped
+  }
+
+  /**
+   * Summarise the published fixture for a year: first/last game dates and the
+   * grand final date once the finals fixture is out. Empty when Squiggle has no
+   * games for that year yet (fixture not published).
+   */
+  static async fetchSeasonFixture(year: number): Promise<SeasonFixtureSummary> {
+    const url = `${SQUIGGLE_BASE}/?q=games;year=${year}`
+    console.log(`[Squiggle] Fetching season fixture: ${url}`)
+    const data = await fetchJson<SquiggleGamesResponse>(url)
+    const games = (data.games || []).filter(g => !!g.date)
+    const dates = games.map(g => melbourneDate(g.date)!).filter(Boolean).sort()
+    const grandFinal = games
+      .filter(g => g.is_final && /grand/i.test(g.roundname || ''))
+      .map(g => melbourneDate(g.date)!)
+      .sort()
+      .pop() || null
+
+    return {
+      year,
+      gameCount: games.length,
+      firstGameDate: dates[0] || null,
+      lastGameDate: dates[dates.length - 1] || null,
+      grandFinalDate: grandFinal,
+    }
   }
 
   /**
@@ -247,8 +319,8 @@ export class SquiggleService {
       roundname: g.roundname,
       hteam: g.hteam,
       ateam: g.ateam,
-      hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
-      ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
+      hteamName: resolveTeamName(g.hteam),
+      ateamName: resolveTeamName(g.ateam),
       complete: g.complete,
       date: g.date,
       venue: g.venue,
@@ -273,7 +345,7 @@ export class SquiggleService {
     }
 
     return data.ladder.map(entry => ({
-      teamName: SQUIGGLE_TO_INTERNAL[entry.team] || entry.team,
+      teamName: resolveTeamName(entry.team),
       source: entry.source,
       rank: entry.rank,
       projWins: Math.round(entry.wins * 10) / 10,
@@ -307,8 +379,8 @@ export class SquiggleService {
           roundname: g.roundname,
           hteam: g.hteam,
           ateam: g.ateam,
-          hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
-          ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
+          hteamName: resolveTeamName(g.hteam),
+          ateamName: resolveTeamName(g.ateam),
           complete: g.complete,
           date: g.date,
           venue: g.venue,
@@ -375,9 +447,9 @@ export class SquiggleService {
     return (data.games as any[]).map(g => ({
       id: g.id,
       round: g.round,
-      hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
-      ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
-      winnerName: g.winner ? (SQUIGGLE_TO_INTERNAL[g.winner] || g.winner) : null,
+      hteamName: resolveTeamName(g.hteam),
+      ateamName: resolveTeamName(g.ateam),
+      winnerName: g.winner ? resolveTeamName(g.winner) : null,
     }))
   }
 
@@ -410,10 +482,10 @@ export class SquiggleService {
         id: g.id,
         round: g.round,
         roundname: g.roundname,
-        hteamName: SQUIGGLE_TO_INTERNAL[g.hteam] || g.hteam,
-        ateamName: SQUIGGLE_TO_INTERNAL[g.ateam] || g.ateam,
+        hteamName: resolveTeamName(g.hteam),
+        ateamName: resolveTeamName(g.ateam),
         complete: g.complete,
-        winnerName: g.complete >= 100 && g.winner ? (SQUIGGLE_TO_INTERNAL[g.winner] || g.winner) : null,
+        winnerName: g.complete >= 100 && g.winner ? resolveTeamName(g.winner) : null,
         date: g.date,
         venue: g.venue,
       }))

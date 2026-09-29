@@ -1,12 +1,15 @@
 import { Request, Response } from 'express'
 import { AuthRequest } from '../middleware/auth'
-import { AFLLadderModel, AFLTeam } from '../models/aflLadder'
+import { AFLLadderModel } from '../models/aflLadder'
 import { ScoreModel } from '../models/score'
-import { SquiggleService } from '../services/squiggle'
+import { SquiggleService, getUnknownTeamNames } from '../services/squiggle'
+import { syncLadderForSeason, getLadderSyncStatus } from '../jobs/ladderSync'
+import { runSeasonLifecycle as runLifecycleJob, getSeasonLifecycleStatus } from '../jobs/seasonLifecycle'
+import { isValidFinalsFormat } from '../utils/finalsBracket'
 import { EmailGroupModel } from '../models/emailGroup'
 import { UserModel, UserRole } from '../models/user'
 import { db } from '../db'
-import { SeasonModel } from '../models/season'
+import { SeasonModel, SeasonStatus } from '../models/season'
 import { EmailTemplateModel } from '../models/emailTemplate'
 import { renderTemplate, extractTemplateTokens } from '../utils/templateRenderer'
 import { sendEmail } from '../services/email'
@@ -57,57 +60,72 @@ export class AdminController {
     }
   }
 
-  /** Auto-sync ladder from Squiggle API */
+  /** Sync the ladder from Squiggle now — same code path as the hourly cron */
   static async syncFromSquiggle(req: AuthRequest, res: Response) {
     try {
       const { userId } = req
       if (userId === undefined) return res.status(401).json({ error: 'Unauthorized' })
 
-      const { seasonId, year } = req.body
-
+      const { seasonId } = req.body
       if (!seasonId) {
         return res.status(400).json({ error: 'seasonId is required' })
       }
 
-      const aflYear = year || new Date().getFullYear()
+      const season = await SeasonModel.getSeasonById(Number(seasonId))
+      if (!season) return res.status(404).json({ error: 'Season not found' })
 
-      let teams = await SquiggleService.fetchStandings(aflYear)
-
-      // If 2026 has no data yet, fall back to previous year for testing
-      if (!teams && aflYear === 2026) {
-        console.log('[Admin] No 2026 data yet — trying 2025 as fallback')
-        teams = await SquiggleService.fetchStandings(2025)
-        if (teams) {
-          console.log('[Admin] Using 2025 standings as placeholder for 2026 season')
-        }
+      const result = await syncLadderForSeason(season)
+      if (result.skipped) {
+        return res.status(409).json({ error: result.message, result })
       }
 
-      if (!teams || teams.length === 0) {
-        return res.status(404).json({
-          error: `No standings data available from Squiggle for ${aflYear}. The AFL season may not have started yet.`
-        })
-      }
-
-      // Pad to 18 if needed (e.g., mid-round partial data)
-      const ladder = await AFLLadderModel.uploadLadder(
-        seasonId,
-        teams as AFLTeam[],
-        null,
-        `squiggle-${aflYear}`
-      )
-
-      await ScoreModel.calculateAndUpdateScores(seasonId)
-
+      const ladder = await AFLLadderModel.getLatestLadder(season.id)
       res.json({
-        message: `Synced ${teams.length} teams from Squiggle (${aflYear})`,
-        source: `squiggle-${aflYear}`,
-        teamsCount: teams.length,
+        message: result.message,
+        source: `squiggle-auto-${season.year}`,
+        teamsCount: result.teamsCount,
+        pins: result.pins,
         ladder,
       })
     } catch (error: any) {
       console.error('Squiggle sync error:', error)
       res.status(500).json({ error: error.message || 'Failed to sync from Squiggle API' })
     }
+  }
+
+  /** Run the season lifecycle now (lock / complete / create next season) */
+  static async runSeasonLifecycle(_req: AuthRequest, res: Response) {
+    const events = await runLifecycleJob()
+    const season = await SeasonModel.getCurrentSeason()
+    res.json({ message: events.length ? events.join(' | ') : 'No changes', events, season })
+  }
+
+  /** Admin: update a season's dates, finals format or status */
+  static async updateSeasonSettings(req: AuthRequest, res: Response) {
+    const seasonId = Number(req.params.seasonId)
+    if (!Number.isInteger(seasonId) || seasonId <= 0) {
+      return res.status(400).json({ error: 'Invalid seasonId' })
+    }
+
+    const { startDate, cutoffDate, grandFinalDate, finalsFormat, status } = req.body || {}
+    const isDate = (v: unknown) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
+    if (startDate !== undefined && !isDate(startDate)) return res.status(400).json({ error: 'startDate must be YYYY-MM-DD' })
+    if (cutoffDate !== undefined && !isDate(cutoffDate)) return res.status(400).json({ error: 'cutoffDate must be YYYY-MM-DD' })
+    if (grandFinalDate !== undefined && grandFinalDate !== null && !isDate(grandFinalDate)) {
+      return res.status(400).json({ error: 'grandFinalDate must be YYYY-MM-DD or null' })
+    }
+    if (finalsFormat !== undefined && !isValidFinalsFormat(finalsFormat)) {
+      return res.status(400).json({ error: "finalsFormat must be 'wildcard10' or 'top8'" })
+    }
+    if (status !== undefined && !['open', 'locked', 'completed'].includes(status)) {
+      return res.status(400).json({ error: "status must be 'open', 'locked' or 'completed'" })
+    }
+
+    let season = await SeasonModel.updateSettings(seasonId, { startDate, cutoffDate, grandFinalDate, finalsFormat })
+    if (!season) return res.status(404).json({ error: 'Season not found' })
+    if (status) season = (await SeasonModel.setStatus(seasonId, status as SeasonStatus)) || season
+
+    res.json({ message: 'Season updated', season })
   }
 
   /** Get latest ladder for a season (public — no auth required) */
@@ -239,11 +257,21 @@ export class AdminController {
     }
   }
 
+  /** Operational health: season state, sync status and anything needing attention */
   static async health(_req: Request, res: Response) {
+    const [current, latest] = await Promise.all([
+      SeasonModel.getCurrentSeason().catch(() => null),
+      SeasonModel.getLatestSeason().catch(() => null),
+    ])
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV,
+      season: current,
+      latestSeason: latest ? { year: latest.year, status: latest.status } : null,
+      ladderSync: getLadderSyncStatus(),
+      seasonLifecycle: getSeasonLifecycleStatus(),
+      unknownTeamNames: getUnknownTeamNames(),
     })
   }
 

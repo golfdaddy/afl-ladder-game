@@ -21,11 +21,13 @@ router.get('/afl-all-upcoming-rounds', asyncHandler(AdminController.getAllUpcomi
 // Admin-only ladder ops — requires X-Admin-Secret header or valid Bearer token
 router.post('/afl-ladder', adminAuth, asyncHandler(AdminController.uploadAFLLadder))
 router.post('/sync-ladder', adminAuth, asyncHandler(AdminController.syncFromSquiggle))
+router.post('/seasons/lifecycle/run', adminAuth, asyncHandler(AdminController.runSeasonLifecycle))
 
 // User management — requires JWT + admin role
 router.get('/users', authMiddleware, requireAdmin, asyncHandler(AdminController.listUsers))
 router.put('/users/:id/role', authMiddleware, requireAdmin, asyncHandler(AdminController.setUserRole))
 router.put('/seasons/:seasonId/cutoff', authMiddleware, requireAdmin, asyncHandler(AdminController.setSeasonCutoff))
+router.put('/seasons/:seasonId/settings', authMiddleware, requireAdmin, asyncHandler(AdminController.updateSeasonSettings))
 router.get('/email/templates', authMiddleware, requireAdmin, asyncHandler(AdminController.listEmailTemplates))
 router.get('/email/template-reference', authMiddleware, requireAdmin, asyncHandler(AdminController.getEmailTemplateReference))
 router.post('/email/templates', authMiddleware, requireAdmin, asyncHandler(AdminController.createEmailTemplate))
