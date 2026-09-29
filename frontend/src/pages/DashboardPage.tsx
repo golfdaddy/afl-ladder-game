@@ -10,7 +10,7 @@ import {
 import FullSeasonSimulator from '../components/FullSeasonSimulator'
 import FinalsPredictor from '../components/FinalsPredictor'
 import SeasonHonours from '../components/SeasonHonours'
-import { SEASON_OVER, SEASON_COMPLETE, FEATURE_FANTASY7_ENABLED } from '../config'
+import { FEATURE_FANTASY7_ENABLED } from '../config'
 import { useCurrentSeason } from '../hooks/useCurrentSeason'
 
 function useCountdown(target: Date) {
@@ -75,7 +75,7 @@ export default function DashboardPage() {
   const logout = useAuthStore((state) => state.logout)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { seasonId, seasonYear, cutoffAt, isLocked: competitionLocked } = useCurrentSeason()
+  const { seasonId, seasonYear, cutoffAt, isLocked: competitionLocked, seasonOver, seasonComplete, finalsFormat } = useCurrentSeason()
   const countdown = useCountdown(cutoffAt)
 
   const [activePanel, setActivePanel] = useState<'none' | 'create' | 'join'>('none')
@@ -603,7 +603,7 @@ export default function DashboardPage() {
 
         {/* Quick Actions — Create/Join hidden during active season, re-appear after season ends */}
         <div className="grid gap-3 mb-8 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
-          {(!competitionLocked || SEASON_OVER) && (
+          {(!competitionLocked || seasonOver) && (
             <button
               onClick={() => togglePanel('create')}
               className={`flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all ${
@@ -622,7 +622,7 @@ export default function DashboardPage() {
             </button>
           )}
 
-          {(!competitionLocked || SEASON_OVER) && (
+          {(!competitionLocked || seasonOver) && (
             <button
               onClick={() => togglePanel('join')}
               className={`flex flex-col items-center justify-center p-5 rounded-2xl border-2 transition-all ${
@@ -1238,7 +1238,7 @@ export default function DashboardPage() {
                     <div className="px-5 py-12 text-center text-slate-400 text-sm">Scores will appear once the AFL season starts.</div>
                   ) : (
                     <>
-                    {SEASON_COMPLETE && (
+                    {seasonComplete && (
                       <div className="px-5 pt-4">
                         <SeasonHonours entries={spotlightLeaderboard} currentUserId={user?.id ?? null} />
                       </div>
@@ -1246,8 +1246,8 @@ export default function DashboardPage() {
                     <div className="divide-y divide-slate-50">
                       {spotlightLeaderboard.map((entry, idx) => {
                         const isMe = entry.userId === user?.id
-                        const isSpoon = SEASON_COMPLETE && spotlightLeaderboard.length >= 2 && entry.totalPoints === spotlightLeaderboard[spotlightLeaderboard.length - 1].totalPoints && entry.totalPoints !== spotlightLeaderboard[0].totalPoints
-                        const medal = SEASON_COMPLETE && idx === 0 ? '🏆' : idx === 0 ? '🥇' : isSpoon ? '🥄' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null
+                        const isSpoon = seasonComplete && spotlightLeaderboard.length >= 2 && entry.totalPoints === spotlightLeaderboard[spotlightLeaderboard.length - 1].totalPoints && entry.totalPoints !== spotlightLeaderboard[0].totalPoints
+                        const medal = seasonComplete && idx === 0 ? '🏆' : idx === 0 ? '🥇' : isSpoon ? '🥄' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null
                         return (
                           <div key={entry.userId} className={`flex items-center gap-3 px-5 py-3 ${isMe ? 'bg-emerald-50/60' : 'hover:bg-slate-50'} transition-colors`}>
                             <div className="w-7 text-center flex-shrink-0">
@@ -1319,6 +1319,7 @@ export default function DashboardPage() {
                           aflLadderData={aflLadderData}
                           predictions={spotlightPredictions as MemberPrediction[]}
                           currentUserId={user?.id ?? null}
+                          finalsFormat={finalsFormat}
                         />
                       )}
 
@@ -1507,6 +1508,7 @@ export default function DashboardPage() {
                       currentUserId={user?.id ?? null}
                       actualLadder={aflTeams}
                       finalsGames={dashFinalsGamesData?.games || []}
+                      finalsFormat={finalsFormat}
                     />
                   )}
                 </div>

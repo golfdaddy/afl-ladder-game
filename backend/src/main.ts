@@ -6,6 +6,7 @@ import cron from 'node-cron';
 import { db } from './db';
 import { runMigrations } from './migrations/run';
 import { syncLadderFromSquiggle } from './jobs/ladderSync';
+import { runSeasonLifecycle } from './jobs/seasonLifecycle';
 import { runFantasySyncJobs } from './jobs/fantasySync';
 import { runMultiJobs } from './jobs/multiJobs';
 import { runSevensJobs } from './jobs/sevensJobs';
@@ -82,6 +83,13 @@ db.connect()
       }, { timezone: APP_TIMEZONE });
       console.log(`[LadderSync] Scheduled: hourly 1pm–midnight every day in ${APP_TIMEZONE}`);
 
+      // Season lifecycle: lock at cutoff, complete after the grand final, and
+      // create next season from the published fixture — no manual rollover.
+      cron.schedule('15 3 * * *', () => {
+        runSeasonLifecycle();
+      }, { timezone: APP_TIMEZONE });
+      console.log(`[SeasonLifecycle] Scheduled: daily 3:15am in ${APP_TIMEZONE}`);
+
       cron.schedule('*/30 * * * *', () => {
         runFantasySyncJobs()
       }, { timezone: APP_TIMEZONE })
@@ -97,10 +105,16 @@ db.connect()
       }, { timezone: APP_TIMEZONE })
       console.log(`[Sevens] Scheduled: round scoring every 15 minutes in ${APP_TIMEZONE}`)
 
-      // Kick the ladder sync and betting/fantasy jobs once on boot so the ladder
-      // (with any finals position adjustments) and player data refresh
-      // immediately after a deploy rather than waiting for the first cron tick.
-      setTimeout(() => { syncLadderFromSquiggle(); runMultiJobs(); runSevensJobs(); }, 8000)
+      // Kick the season lifecycle, ladder sync and betting/fantasy jobs once on
+      // boot so the season state, ladder (with any finals position adjustments)
+      // and player data refresh immediately after a deploy rather than waiting
+      // for the first cron tick. Lifecycle runs first so a freshly created
+      // season is what the ladder sync targets.
+      setTimeout(() => {
+        runSeasonLifecycle().finally(() => syncLadderFromSquiggle());
+        runMultiJobs();
+        runSevensJobs();
+      }, 8000)
     } else {
       console.log(`[Scheduler] Cron jobs disabled in ${NODE_ENV} environment`);
     }

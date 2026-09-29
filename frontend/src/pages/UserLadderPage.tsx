@@ -25,7 +25,7 @@ export default function UserLadderPage() {
   const { userId } = useParams<{ userId: string }>()
   const navigate = useNavigate()
   const currentUser = useAuthStore((state) => state.user)
-  const { seasonId } = useCurrentSeason()
+  const { seasonId, seasonYear } = useCurrentSeason()
 
   // Fetch the target user's prediction
   const { data: targetData, isLoading: targetLoading } = useQuery({
@@ -124,7 +124,7 @@ export default function UserLadderPage() {
             </button>
             <div className="flex-1">
               <p className="text-slate-500 text-xs font-semibold uppercase tracking-widest mb-1">
-                2026 AFL Prediction
+                {seasonYear} AFL Prediction
               </p>
               <h1 className="text-2xl font-black text-white">
                 {isViewingOwnLadder ? 'Your Ladder' : `${targetData.displayName}'s Ladder`}
